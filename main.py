@@ -22,6 +22,7 @@ CHUNK_DURATION = 0.1       # seconds per chunk
 SILENCE_THRESHOLD = 0.01   # RMS amplitude below this = silence
 SILENCE_DURATION = 1.5     # seconds of silence to stop recording
 MAX_DURATION = 30          # safety cap in seconds
+PRE_SPEECH_TIMEOUT = 10    # seconds to wait before any speech is detected
 
 whisper_model = whisper.load_model("base")
 tts = KPipeline(lang_code='a')
@@ -31,12 +32,14 @@ def record_until_silence():
     chunk_size = int(SAMPLE_RATE * CHUNK_DURATION)
     silence_chunks_needed = int(SILENCE_DURATION / CHUNK_DURATION)
     max_chunks = int(MAX_DURATION / CHUNK_DURATION)
+    pre_speech_chunks = int(PRE_SPEECH_TIMEOUT / CHUNK_DURATION)
 
     frames = []
     silent_count = 0
     has_speech = False
 
-    with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32") as stream:
+    with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
+                        blocksize=chunk_size) as stream:
         while len(frames) < max_chunks:
             chunk, _ = stream.read(chunk_size)
             frames.append(chunk.copy())
@@ -48,6 +51,8 @@ def record_until_silence():
                 silent_count += 1
                 if silent_count >= silence_chunks_needed:
                     break
+            elif len(frames) >= pre_speech_chunks:
+                break
 
     return np.concatenate(frames).flatten()
 
@@ -108,6 +113,7 @@ def clean(text: str) -> str:
     text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)  # **bold**
     text = re.sub(r'\*(.+?)\*', r'\1', text)       # *italic*
     text = re.sub(r'#+\s*', '', text)              # ## headings
+    text = re.sub(r'^\d+\.\s*', '', text, flags=re.MULTILINE)  # numbered lists
     text = re.sub(r'\n+', ' ', text)               # newlines → space
     text = re.sub(r'\s{2,}', ' ', text)            # collapse spaces
     return text.strip()
