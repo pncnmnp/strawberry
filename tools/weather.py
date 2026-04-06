@@ -6,7 +6,7 @@ DEFINITION = {
     "type": "function",
     "function": {
         "name": "get_weather",
-        "description": "Get the current weather. If no location is given, auto-detects based on IP.",
+        "description": "Get the current weather. Location is optional — auto-detects via IP if omitted.",
         "parameters": {
             "type": "object",
             "properties": {

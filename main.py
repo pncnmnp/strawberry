@@ -11,6 +11,8 @@ import numpy as np
 import json
 import os
 import re
+import threading
+import subprocess
 from datetime import datetime
 
 from prompts.mk1 import SYSTEM_PROMPT
@@ -26,6 +28,32 @@ PRE_SPEECH_TIMEOUT = 10    # seconds to wait before any speech is detected
 
 whisper_model = whisper.load_model("base")
 tts = KPipeline(lang_code='a')
+
+MUSIC_FILE = os.path.join(os.path.dirname(__file__), "typing-sounds.mp3")
+_music_stop = threading.Event()
+_music_thread = None
+
+
+def _music_loop():
+    while not _music_stop.is_set():
+        proc = subprocess.Popen(["afplay", MUSIC_FILE])
+        while proc.poll() is None:
+            if _music_stop.wait(timeout=0):
+                proc.terminate()
+                return
+
+
+def start_music():
+    global _music_thread
+    _music_stop.clear()
+    _music_thread = threading.Thread(target=_music_loop, daemon=True)
+    _music_thread.start()
+
+
+def stop_music():
+    _music_stop.set()
+    if _music_thread:
+        _music_thread.join()
 
 
 def record_until_silence():
@@ -135,7 +163,9 @@ def main():
             continue
 
         history.append({"role": "user", "content": text})
+        start_music()
         reply = think(history)
+        stop_music()
 
         match reply:
             case "resetting":

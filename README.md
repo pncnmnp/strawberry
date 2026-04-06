@@ -22,3 +22,7 @@ A local voice assistant. Listens via microphone, transcribes with Whisper, think
 ollama serve
 uv run main.py
 ```
+
+## Credits
+
+- Keyboard typing sound from [Pixabay](https://pixabay.com/sound-effects/film-special-effects-typing-on-laptop-keyboard-308455/), licensed under the [Pixabay Content License](https://pixabay.com/service/license-summary/).

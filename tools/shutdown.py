@@ -2,7 +2,7 @@ DEFINITION = {
     "type": "function",
     "function": {
         "name": "shutdown",
-        "description": "Shut down and exit the assistant when the user asks to stop, quit, exit, goodbye, or similar.",
+        "description": "Shut down and exit the assistant when the user asks to sleep, wind down, stop, quit, exit, goodbye, or similar.",
         "parameters": {
             "type": "object",
             "properties": {},
