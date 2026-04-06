@@ -11,6 +11,7 @@ _LABELS: dict[str, tuple[str, str]] = {
     "reply":  ("GEMMA",   "bold green"),
     "speak":  ("SPEAK",   "bold cyan"),
     "warn":   ("WARN",    "bold red"),
+    "wiki":   ("WIKI",    "bold blue"),
     "reset":  ("RESET",   "bold magenta"),
     "dump":   ("DUMP",    "dim magenta"),
 }
