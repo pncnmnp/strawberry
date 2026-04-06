@@ -1,4 +1,4 @@
-# hello-world
+# Lucius v1
 
 A local voice assistant. Listens via microphone, transcribes with Whisper, thinks with Gemma via Ollama, speaks with Kokoro TTS.
 
