@@ -8,6 +8,9 @@ import sounddevice as sd
 import whisper
 import ollama
 import numpy as np
+import json
+import os
+from datetime import datetime
 
 from prompts.mk1 import SYSTEM_PROMPT
 from tools import TOOLS, dispatch
@@ -53,7 +56,7 @@ def transcribe(audio) -> str:
     return transcription["text"].strip()  # type: ignore
 
 
-def think(history: list) -> tuple[str, bool]:
+def think(history: list) -> str:
     response = ollama.chat(model="gemma4:e2b", messages=history, tools=TOOLS)
     message = response["message"]
 
@@ -66,12 +69,38 @@ def think(history: list) -> tuple[str, bool]:
             tool_result = dispatch(name, args)
             log("result", tool_result)
             history.append({"role": "tool", "content": tool_result})
-            if tool_result == "shutting_down":
-                return "", True
+            if tool_result in ("shutting_down", "resetting"):
+                return tool_result
         response = ollama.chat(model="gemma4:e4b", messages=history)
         message = response["message"]
 
-    return message["content"], False
+    return message["content"]
+
+
+def dump_history(history: list):
+    os.makedirs("history", exist_ok=True)
+    filename = f"history/{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    def _serialize(obj):
+        if hasattr(obj, "model_dump"):
+            return obj.model_dump()
+        if hasattr(obj, "__dict__"):
+            return obj.__dict__
+        return str(obj)
+
+    with open(filename, "w") as f:
+        json.dump(history, f, indent=2, default=_serialize)
+    log("dump", filename)
+
+
+def listen() -> str | None:
+    log("listen", "waiting for speech...")
+    audio = record_until_silence()
+    text = transcribe(audio.flatten())
+    if not text:
+        log("warn", "no speech detected")
+        return None
+    log("input", f'"{text}"')
+    return text
 
 
 def speak(text: str):
@@ -85,28 +114,31 @@ def main():
 
     while True:
         divider()
-        log("listen", "waiting for speech...")
-        audio_in = record_until_silence()
 
-        text = transcribe(audio_in.flatten())
-        if not text:
-            log("warn", "no speech detected")
+        if not (text := listen()):
             continue
-        log("input", f'"{text}"')
 
         history.append({"role": "user", "content": text})
-        reply, should_exit = think(history)
+        reply = think(history)
 
-        if should_exit:
-            log("speak", "shutting down...")
-            divider()
-            break
+        match reply:
+            case "resetting":
+                dump_history(history)
+                log("reset", "clearing conversation history...")
+                history = [{"role": "system", "content": SYSTEM_PROMPT}]
+                speak("Sure, starting fresh.")
 
-        log("reply", f'"{reply}"')
-        history.append({"role": "assistant", "content": reply})
+            case "shutting_down":
+                dump_history(history)
+                log("speak", "shutting down...")
+                divider()
+                break
 
-        log("speak", "playing response...")
-        speak(reply)
+            case _:
+                log("reply", f'"{reply}"')
+                history.append({"role": "assistant", "content": reply})
+                log("speak", "playing response...")
+                speak(reply)
 
 
 if __name__ == "__main__":
