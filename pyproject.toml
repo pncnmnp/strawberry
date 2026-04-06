@@ -5,6 +5,11 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "ddgs>=9.12.1",
+    "kokoro>=0.9.4",
+    "numpy>=2.4.4",
     "ollama>=0.6.1",
+    "openai-whisper>=20250625",
+    "sounddevice>=0.5.5",
     "wikipedia>=1.4.0",
 ]
