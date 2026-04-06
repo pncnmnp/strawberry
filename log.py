@@ -14,6 +14,7 @@ _LABELS: dict[str, tuple[str, str]] = {
     "search":    ("SEARCH",    "bold blue"),
     "wikipedia": ("WIKIPEDIA", "bold cyan"),
     "duckduckgo":("DUCKDUCKGO","bold yellow"),
+    "notes":  ("NOTES",   "bold green"),
     "reset":  ("RESET",   "bold magenta"),
     "dump":   ("DUMP",    "dim magenta"),
 }

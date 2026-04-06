@@ -11,3 +11,6 @@ wheels/
 
 # Conversation history dumps
 history/
+
+# Personal notes
+notes.db
