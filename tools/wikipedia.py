@@ -21,14 +21,19 @@ DEFINITION = {
 }
 
 
-def search_wikipedia(query: str) -> str:
-    query = wiki_normalize(query)
-    log("wiki", f"normalized query: {query}")
+def _fetch(title: str) -> str:
     try:
-        result = wikipedia.summary(query, sentences=3, auto_suggest=True)
+        page = wikipedia.page(title, auto_suggest=False)
+        return page.summary
     except wikipedia.DisambiguationError as e:
-        return search_wikipedia(e.options[0])
+        return _fetch(e.options[0])
     except wikipedia.PageError:
-        return f"No Wikipedia page found for '{query}'."
+        return f"No Wikipedia page found for '{title}'."
+
+
+def search_wikipedia(query: str) -> str:
+    title = wiki_normalize(query)
+    log("wiki", f"normalized: {title}")
+    result = _fetch(title)
     log("wiki", result)
     return result

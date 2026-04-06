@@ -10,6 +10,7 @@ import ollama
 import numpy as np
 import json
 import os
+import re
 from datetime import datetime
 
 from prompts.mk1 import SYSTEM_PROMPT
@@ -71,7 +72,7 @@ def think(history: list) -> str:
             history.append({"role": "tool", "content": tool_result})
             if tool_result in ("shutting_down", "resetting"):
                 return tool_result
-        response = ollama.chat(model="gemma4:e4b", messages=history)
+        response = ollama.chat(model="gemma4:e2b", messages=history)
         message = response["message"]
 
     return message["content"]
@@ -101,6 +102,15 @@ def listen() -> str | None:
         return None
     log("input", f'"{text}"')
     return text
+
+
+def clean(text: str) -> str:
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)  # **bold**
+    text = re.sub(r'\*(.+?)\*', r'\1', text)       # *italic*
+    text = re.sub(r'#+\s*', '', text)              # ## headings
+    text = re.sub(r'\n+', ' ', text)               # newlines → space
+    text = re.sub(r'\s{2,}', ' ', text)            # collapse spaces
+    return text.strip()
 
 
 def speak(text: str):
@@ -138,7 +148,7 @@ def main():
                 log("reply", f'"{reply}"')
                 history.append({"role": "assistant", "content": reply})
                 log("speak", "playing response...")
-                speak(reply)
+                speak(clean(reply))
 
 
 if __name__ == "__main__":
