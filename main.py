@@ -5,7 +5,7 @@ logging.disable(logging.CRITICAL)
 
 from kokoro import KPipeline
 import sounddevice as sd
-import whisper
+from faster_whisper import WhisperModel
 import ollama
 import numpy as np
 import json
@@ -26,7 +26,7 @@ SILENCE_DURATION = 1.5     # seconds of silence to stop recording
 MAX_DURATION = 30          # safety cap in seconds
 PRE_SPEECH_TIMEOUT = 10    # seconds to wait before any speech is detected
 
-whisper_model = whisper.load_model("base")
+whisper_model = WhisperModel("base.en", device="cpu", compute_type="int8")
 tts = KPipeline(lang_code='a')
 
 MUSIC_FILE = os.path.join(os.path.dirname(__file__), "typing-sounds.mp3")
@@ -86,8 +86,8 @@ def record_until_silence():
 
 
 def transcribe(audio) -> str:
-    transcription = whisper_model.transcribe(audio)  # type: ignore[union-attr]
-    return transcription["text"].strip()  # type: ignore
+    segments, _ = whisper_model.transcribe(audio, language="en")
+    return "".join(s.text for s in segments).strip()
 
 
 def think(history: list) -> str:
