@@ -1,5 +1,7 @@
 import warnings
 import logging
+import _thread
+import sys
 warnings.filterwarnings("ignore")
 logging.disable(logging.CRITICAL)
 
@@ -32,6 +34,15 @@ tts = KPipeline(lang_code='a')
 MUSIC_FILE = os.path.join(os.path.dirname(__file__), "typing-sounds.mp3")
 _music_stop = threading.Event()
 _music_thread = None
+
+_exit_requested = threading.Event()
+
+def _watch_stdin():
+    """Raise KeyboardInterrupt in main thread when Ctrl+D (EOF) is pressed."""
+    while sys.stdin.read(1) != "":
+        pass
+    _exit_requested.set()
+    _thread.interrupt_main()
 
 
 def _music_loop():
@@ -153,7 +164,24 @@ def speak(text: str):
         sd.wait()
 
 
+def respond(history: list) -> str | None:
+    start_music()
+    try:
+        return think(history)
+    except KeyboardInterrupt:
+        if _exit_requested.is_set():
+            dump_history(history)
+            log("interrupt", "exiting...")
+            divider()
+            raise SystemExit(0)
+        log("interrupt", "aborted, re-prompting...")
+        return None
+    finally:
+        stop_music()
+
+
 def main():
+    threading.Thread(target=_watch_stdin, daemon=True).start()
     history = [{"role": "system", "content": SYSTEM_PROMPT}]
 
     while True:
@@ -163,9 +191,9 @@ def main():
             continue
 
         history.append({"role": "user", "content": text})
-        start_music()
-        reply = think(history)
-        stop_music()
+        if (reply := respond(history)) is None:
+            history.pop()
+            continue
 
         match reply:
             case "resetting":

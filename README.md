@@ -10,7 +10,7 @@ A local voice assistant. Listens via microphone, transcribes with Whisper, think
 - Shut down on command
 
 ## Stack
-- **STT**: OpenAI Whisper (`base`)
+- **STT**: Faster Whisper (`base`)
 - **LLM**: `gemma4:e2b` via Ollama (100% GPU on Apple Silicon)
 - **TTS**: Kokoro (`af_heart` voice)
 - **Search**: Wikipedia + DuckDuckGo
