@@ -2,6 +2,7 @@ import warnings
 import logging
 import _thread
 import sys
+import time
 warnings.filterwarnings("ignore")
 logging.disable(logging.CRITICAL)
 
@@ -140,6 +141,7 @@ def dump_history(history: list):
 def listen() -> str | None:
     log("listen", "waiting for speech...")
     audio = record_until_silence()
+    log("listen", "recorded...")
     text = transcribe(audio.flatten())
     if not text:
         log("warn", "no speech detected")
@@ -211,8 +213,8 @@ def main():
             case _:
                 log("reply", f'"{reply}"')
                 history.append({"role": "assistant", "content": reply})
-                log("speak", "playing response...")
                 speak(clean(reply))
+                log("speak", f"playing response...")
 
 
 if __name__ == "__main__":
