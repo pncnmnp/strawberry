@@ -163,7 +163,12 @@ def clean(text: str) -> str:
 def speak(text: str):
     for _, (gs, ps, audio) in enumerate(tts(text, voice="af_heart")):
         sd.play(audio, samplerate=24000)
-        sd.wait()
+        try:
+            while sd.get_stream().active:
+                time.sleep(0.05)
+        except KeyboardInterrupt:
+            sd.stop()
+            raise
 
 
 def respond(history: list) -> str | None:
@@ -189,7 +194,12 @@ def main():
     while True:
         divider()
 
-        if not (text := listen()):
+        try:
+            text = listen()
+        except KeyboardInterrupt:
+            log("interrupt", "listening interrupted, re-prompting...")
+            continue
+        if not text:
             continue
 
         history.append({"role": "user", "content": text})
@@ -213,7 +223,11 @@ def main():
             case _:
                 log("reply", f'"{reply}"')
                 history.append({"role": "assistant", "content": reply})
-                speak(clean(reply))
+                try:
+                    speak(clean(reply))
+                except KeyboardInterrupt:
+                    log("interrupt", "speech interrupted, re-prompting...")
+                    continue
                 log("speak", f"playing response...")
 
 
