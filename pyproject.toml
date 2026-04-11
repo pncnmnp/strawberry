@@ -1,5 +1,5 @@
 [project]
-name = "lucius"
+name = "strawberry"
 version = "1.0.0"
 description = "A local voice assistant"
 readme = "README.md"

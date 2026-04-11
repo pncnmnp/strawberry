@@ -30,9 +30,14 @@ MAX_DURATION = 30          # safety cap in seconds
 PRE_SPEECH_TIMEOUT = 10    # seconds to wait before any speech is detected
 
 whisper_model = WhisperModel("base.en", device="cpu", compute_type="int8")
+wake_model = WhisperModel("tiny.en", device="cpu", compute_type="int8")
+
+WAKE_PHRASE = "hey strawberry"
+WAKE_WINDOW = 2.0          # seconds of audio to check for wake word
+WAKE_STRIDE = 0.5          # seconds between checks
 tts = KPipeline(lang_code='a')
 
-MUSIC_FILE = os.path.join(os.path.dirname(__file__), "typing-sounds.mp3")
+TYPING_MUSIC_FILE = os.path.join(os.path.dirname(__file__), "sounds", "typing.mp3")
 _music_stop = threading.Event()
 _music_thread = None
 
@@ -48,7 +53,7 @@ def _watch_stdin():
 
 def _music_loop():
     while not _music_stop.is_set():
-        proc = subprocess.Popen(["afplay", MUSIC_FILE])
+        proc = subprocess.Popen(["afplay", TYPING_MUSIC_FILE])
         while proc.poll() is None:
             if _music_stop.wait(timeout=0):
                 proc.terminate()
@@ -66,6 +71,40 @@ def stop_music():
     _music_stop.set()
     if _music_thread:
         _music_thread.join()
+
+
+def wait_for_wake_word():
+    chunk_size = int(SAMPLE_RATE * WAKE_STRIDE)
+    window_chunks = int(WAKE_WINDOW / WAKE_STRIDE)
+    buffer = []
+
+    log("wake", f'listening for "{WAKE_PHRASE}"...')
+    with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
+                        blocksize=chunk_size) as stream:
+        while True:
+            chunk, _ = stream.read(chunk_size)
+            buffer.append(chunk.copy())
+            if len(buffer) > window_chunks:
+                buffer.pop(0)
+
+            # skip whisper if audio is silent
+            window = np.concatenate(buffer).flatten()
+            rms = np.sqrt(np.mean(window ** 2))
+            if rms < SILENCE_THRESHOLD:
+                continue
+
+            segments, _ = wake_model.transcribe(
+                window,
+                language="en",
+                beam_size=1,
+                initial_prompt=WAKE_PHRASE,
+                without_timestamps=True,
+            )
+            text = "".join(s.text for s in segments).lower().strip()
+            if WAKE_PHRASE in text:
+                log("wake", "detected!")
+                subprocess.run(["afplay", "sounds/wake-up.mp3"])
+                return
 
 
 def record_until_silence():
@@ -195,6 +234,7 @@ def main():
         divider()
 
         try:
+            wait_for_wake_word()
             text = listen()
         except KeyboardInterrupt:
             log("interrupt", "listening interrupted, re-prompting...")
@@ -218,6 +258,7 @@ def main():
                 dump_history(history)
                 log("speak", "shutting down...")
                 divider()
+                subprocess.run(["afplay", "sounds/shutdown.mp3"])
                 break
 
             case _:
