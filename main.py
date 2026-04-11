@@ -154,7 +154,7 @@ def think(history: list) -> str:
             tool_result = dispatch(name, args)
             log("result", tool_result)
             history.append({"role": "tool", "content": tool_result})
-            if tool_result in ("shutting_down", "resetting"):
+            if tool_result in ("shutting_down", "resetting", "muting"):
                 return tool_result
         response = ollama.chat(model="gemma4:e2b", messages=history)
         message = response["message"]
@@ -229,12 +229,15 @@ def respond(history: list) -> str | None:
 def main():
     threading.Thread(target=_watch_stdin, daemon=True).start()
     history = [{"role": "system", "content": SYSTEM_PROMPT}]
+    awake = False
 
     while True:
         divider()
 
         try:
-            wait_for_wake_word()
+            if not awake:
+                wait_for_wake_word()
+                awake = True
             text = listen()
         except KeyboardInterrupt:
             log("interrupt", "listening interrupted, re-prompting...")
@@ -261,6 +264,10 @@ def main():
                 subprocess.run(["afplay", "sounds/shutdown.mp3"])
                 break
 
+            case "muting":
+                log("wake", "muting — wake word required next time")
+                awake = False
+
             case _:
                 log("reply", f'"{reply}"')
                 history.append({"role": "assistant", "content": reply})
@@ -270,7 +277,6 @@ def main():
                     log("interrupt", "speech interrupted, re-prompting...")
                     continue
                 log("speak", f"playing response...")
-
 
 if __name__ == "__main__":
     main()

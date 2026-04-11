@@ -3,8 +3,9 @@ from tools.shutdown import DEFINITION as _shutdown_def, shutdown
 from tools.reset import DEFINITION as _reset_def, reset_history
 from tools.search import DEFINITION as _search_def, search
 from tools.notes import SAVE_DEFINITION as _save_note_def, RECALL_DEFINITION as _recall_notes_def, save_note, recall_notes
+from tools.mute import DEFINITION as _mute_def, mute
 
-TOOLS = [_weather_def, _shutdown_def, _reset_def, _search_def, _save_note_def, _recall_notes_def]
+TOOLS = [_weather_def, _shutdown_def, _reset_def, _search_def, _save_note_def, _recall_notes_def, _mute_def]
 
 
 def dispatch(tool_name: str, args: dict) -> str:
@@ -20,4 +21,6 @@ def dispatch(tool_name: str, args: dict) -> str:
         return save_note(**args)
     if tool_name == "recall_notes":
         return recall_notes(**args)
+    if tool_name == "mute":
+        return mute()
     raise ValueError(f"Unknown tool: {tool_name}")
