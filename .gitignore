@@ -17,3 +17,6 @@ notes.db
 
 # macOS
 .DS_Store
+
+# Temporary files
+default.profraw

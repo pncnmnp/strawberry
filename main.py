@@ -91,35 +91,36 @@ def wait_for_wake_word():
     buffer = []
 
     log("wake", f'listening for "{WAKE_PHRASE}"...')
-    with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
-                        blocksize=chunk_size) as stream:
-        while True:
-            chunk, _ = stream.read(chunk_size)
-            buffer.append(chunk.copy())
-            if len(buffer) > window_chunks:
-                buffer.pop(0)
+    stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
+                            blocksize=chunk_size)
+    stream.start()
+    while True:
+        chunk, _ = stream.read(chunk_size)
+        buffer.append(chunk.copy())
+        if len(buffer) > window_chunks:
+            buffer.pop(0)
 
-            # skip whisper if audio is silent
-            window = np.concatenate(buffer).flatten()
-            rms = np.sqrt(np.mean(window ** 2))
-            if rms < SILENCE_THRESHOLD:
-                continue
+        # skip whisper if audio is silent
+        window = np.concatenate(buffer).flatten()
+        rms = np.sqrt(np.mean(window ** 2))
+        if rms < SILENCE_THRESHOLD:
+            continue
 
-            segments, _ = wake_model.transcribe(
-                window,
-                language="en",
-                beam_size=1,
-                initial_prompt=WAKE_PHRASE,
-                without_timestamps=True,
-            )
-            text = "".join(s.text for s in segments).lower().strip()
-            if WAKE_PHRASE in text:
-                log("wake", "detected!")
-                subprocess.run(["afplay", "sounds/wake-up.mp3"])
-                return
+        segments, _ = wake_model.transcribe(
+            window,
+            language="en",
+            beam_size=1,
+            initial_prompt=WAKE_PHRASE,
+            without_timestamps=True,
+        )
+        text = "".join(s.text for s in segments).lower().strip()
+        if WAKE_PHRASE in text:
+            log("wake", "detected!")
+            subprocess.Popen(["afplay", "sounds/wake-up.mp3"])
+            return stream  # keep stream open so listen() can use it immediately
 
 
-def record_until_silence():
+def record_until_silence(stream=None):
     chunk_size = int(SAMPLE_RATE * CHUNK_DURATION)
     silence_chunks_needed = int(SILENCE_DURATION / CHUNK_DURATION)
     max_chunks = int(MAX_DURATION / CHUNK_DURATION)
@@ -129,8 +130,13 @@ def record_until_silence():
     silent_count = 0
     has_speech = False
 
-    with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
-                        blocksize=chunk_size) as stream:
+    owns_stream = stream is None
+    if owns_stream:
+        stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
+                                blocksize=chunk_size)
+        stream.start()
+
+    try:
         while len(frames) < max_chunks:
             chunk, _ = stream.read(chunk_size)
             frames.append(chunk.copy())
@@ -144,6 +150,10 @@ def record_until_silence():
                     break
             elif len(frames) >= pre_speech_chunks:
                 break
+    finally:
+        if owns_stream:
+            stream.stop()
+            stream.close()
 
     return np.concatenate(frames).flatten()
 
@@ -208,9 +218,12 @@ def dump_history(history: list):
     log("dump", filename)
 
 
-def listen() -> str | None:
+def listen(stream=None) -> str | None:
     log("listen", "waiting for speech...")
-    audio = record_until_silence()
+    audio = record_until_silence(stream)
+    if stream:
+        stream.stop()
+        stream.close()
     log("listen", "recorded...")
     text = transcribe(audio.flatten())
     if not text:
@@ -269,10 +282,11 @@ def main():
         divider()
 
         try:
+            stream = None
             if not awake:
-                wait_for_wake_word()
+                stream = wait_for_wake_word()
                 awake = True
-            text = listen()
+            text = listen(stream)
         except KeyboardInterrupt:
             log("interrupt", "listening interrupted, re-prompting...")
             continue
