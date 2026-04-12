@@ -1,4 +1,4 @@
-import ollama
+from lm import chat
 
 _SYSTEM = """You are a Wikipedia search assistant. Given a topic or phrase, return the most likely Wikipedia article title for it.
 
@@ -12,11 +12,4 @@ Rules:
 
 
 def normalize(query: str) -> str:
-    response = ollama.chat(
-        model="gemma4:e2b",
-        messages=[
-            {"role": "system", "content": _SYSTEM},
-            {"role": "user", "content": query},
-        ],
-    )
-    return response["message"]["content"].strip()
+    return chat(_SYSTEM, query).strip()

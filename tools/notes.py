@@ -5,56 +5,13 @@ from log import log
 
 init()
 
-SAVE_DEFINITION = {
-    "type": "function",
-    "function": {
-        "name": "save_note",
-        "description": "Save a personal note or piece of information the user wants to remember. Optionally tagged by topic.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "content": {
-                    "type": "string",
-                    "description": "The note to save.",
-                },
-                "tag": {
-                    "type": "string",
-                    "description": "Topic tag to categorise the note (e.g. 'reminders', 'ideas', 'work'). Defaults to 'general'.",
-                },
-            },
-            "required": ["content"],
-        },
-    },
-}
-
-RECALL_DEFINITION = {
-    "type": "function",
-    "function": {
-        "name": "recall_notes",
-        "description": "Search and recall saved personal notes. Supports keyword search, tag filter, and natural language time range.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Keyword or topic to search notes for.",
-                },
-                "tag": {
-                    "type": "string",
-                    "description": "Filter notes by tag.",
-                },
-                "time_range": {
-                    "type": "string",
-                    "description": "Natural language time window, e.g. 'last hour', 'last 2 hours', 'today', 'yesterday', 'last week', 'in March'.",
-                },
-            },
-            "required": [],
-        },
-    },
-}
-
-
 def save_note(content: str, tag: str = "general") -> str:
+    """Save a personal note or piece of information the user wants to remember.
+
+    Args:
+        content: The note to save.
+        tag: Topic tag to categorise the note (e.g. 'reminders', 'ideas', 'work'). Defaults to 'general'.
+    """
     tag = tag.lower().strip()
     with get_conn() as conn:
         conn.execute(
@@ -70,6 +27,13 @@ def recall_notes(
     tag: str | None = None,
     time_range: str | None = None,
 ) -> str:
+    """Search and recall saved personal notes. Supports keyword search, tag filter, and natural language time range.
+
+    Args:
+        query: Keyword or topic to search notes for.
+        tag: Filter notes by tag.
+        time_range: Natural language time window, e.g. 'last hour', 'last 2 hours', 'today', 'yesterday', 'last week', 'in March'.
+    """
     from_dt, to_dt = time_parse(time_range) if time_range else (None, None)
 
     if time_range:

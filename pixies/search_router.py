@@ -1,4 +1,4 @@
-import ollama
+from lm import chat
 
 _SYSTEM = """You decide whether a search query should go to Wikipedia or DuckDuckGo.
 
@@ -12,12 +12,5 @@ Examples: "competitors of American Express", "best noise cancelling headphones 2
 
 
 def route(query: str) -> str:
-    response = ollama.chat(
-        model="gemma4:e2b",
-        messages=[
-            {"role": "system", "content": _SYSTEM},
-            {"role": "user", "content": query},
-        ],
-    )
-    decision = response["message"]["content"].strip().lower()
+    decision = chat(_SYSTEM, query).strip().lower()
     return "wikipedia" if "wikipedia" in decision else "duckduckgo"

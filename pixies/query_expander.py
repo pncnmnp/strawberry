@@ -1,5 +1,5 @@
 import json
-import ollama
+from lm import chat
 
 _SYSTEM = """You expand a search query with synonyms and closely related terms to improve search recall.
 
@@ -13,15 +13,8 @@ Examples:
 
 
 def expand(query: str) -> list[str]:
-    response = ollama.chat(
-        model="gemma4:e2b",
-        messages=[
-            {"role": "system", "content": _SYSTEM},
-            {"role": "user", "content": query},
-        ],
-    )
     try:
-        terms = json.loads(response["message"]["content"].strip())
+        terms = json.loads(chat(_SYSTEM, query).strip())
         if isinstance(terms, list):
             return [str(t) for t in terms]
     except (json.JSONDecodeError, ValueError):

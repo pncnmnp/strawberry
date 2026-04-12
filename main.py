@@ -1,3 +1,4 @@
+import os
 import warnings
 import logging
 import _thread
@@ -9,17 +10,19 @@ logging.disable(logging.CRITICAL)
 from kokoro import KPipeline
 import sounddevice as sd
 from faster_whisper import WhisperModel
-import ollama
 import numpy as np
 import json
-import os
 import re
 import threading
 import subprocess
+from dataclasses import dataclass, field
 from datetime import datetime
+from functools import wraps
+from typing import Any
 
 from prompts.mk1 import SYSTEM_PROMPT
-from tools import TOOLS, dispatch
+from tools import TOOL_FUNCTIONS
+from lm import get_engine, cleanup as lm_cleanup, _suppress_stderr, _restore_stderr
 from log import log, divider
 
 SAMPLE_RATE = 16000        # samples per second
@@ -38,39 +41,48 @@ WAKE_STRIDE = 0.5          # seconds between checks
 tts = KPipeline(lang_code='a')
 
 TYPING_MUSIC_FILE = os.path.join(os.path.dirname(__file__), "sounds", "typing.mp3")
-_music_stop = threading.Event()
-_music_thread = None
 
-_exit_requested = threading.Event()
+SIGNALS = ("shutting_down", "resetting", "muting")
+
+
+@dataclass
+class AppState:
+    signal: str | None = None
+    conversation: Any = None
+    music_thread: threading.Thread | None = None
+    music_stop: threading.Event = field(default_factory=threading.Event)
+    exit_requested: threading.Event = field(default_factory=threading.Event)
+
+
+state = AppState()
 
 def _watch_stdin():
     """Raise KeyboardInterrupt in main thread when Ctrl+D (EOF) is pressed."""
     while sys.stdin.read(1) != "":
         pass
-    _exit_requested.set()
+    state.exit_requested.set()
     _thread.interrupt_main()
 
 
 def _music_loop():
-    while not _music_stop.is_set():
+    while not state.music_stop.is_set():
         proc = subprocess.Popen(["afplay", TYPING_MUSIC_FILE])
         while proc.poll() is None:
-            if _music_stop.wait(timeout=0):
+            if state.music_stop.wait(timeout=0):
                 proc.terminate()
                 return
 
 
 def start_music():
-    global _music_thread
-    _music_stop.clear()
-    _music_thread = threading.Thread(target=_music_loop, daemon=True)
-    _music_thread.start()
+    state.music_stop.clear()
+    state.music_thread = threading.Thread(target=_music_loop, daemon=True)
+    state.music_thread.start()
 
 
 def stop_music():
-    _music_stop.set()
-    if _music_thread:
-        _music_thread.join()
+    state.music_stop.set()
+    if state.music_thread:
+        state.music_thread.join()
 
 
 def wait_for_wake_word():
@@ -141,25 +153,44 @@ def transcribe(audio) -> str:
     return "".join(s.text for s in segments).strip()
 
 
-def think(history: list) -> str:
-    response = ollama.chat(model="gemma4:e2b", messages=history, tools=TOOLS)
-    message = response["message"]
+def _wrap_tool(fn):
+    """Wrap a tool function to log calls and capture signal returns."""
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        log("tool", f"{fn.__name__}  {kwargs or args}")
+        result = fn(*args, **kwargs)
+        log("result", str(result)[:1000])
+        if result in SIGNALS:
+            state.signal = result
+        return result
+    return wrapper
 
-    if message.get("tool_calls"):
-        history.append(message)
-        for tool_call in message["tool_calls"]:
-            name = tool_call["function"]["name"]
-            args = tool_call["function"]["arguments"]
-            log("tool", f"{name}  {args}")
-            tool_result = dispatch(name, args)
-            log("result", tool_result)
-            history.append({"role": "tool", "content": tool_result})
-            if tool_result in ("shutting_down", "resetting", "muting"):
-                return tool_result
-        response = ollama.chat(model="gemma4:e2b", messages=history)
-        message = response["message"]
 
-    return message["content"]
+def _make_conversation():
+    saved = _suppress_stderr()
+    try:
+        state.conversation = get_engine().create_conversation(
+            messages=[{"role": "system", "content": [{"type": "text", "text": SYSTEM_PROMPT}]}],
+            tools=[_wrap_tool(fn) for fn in TOOL_FUNCTIONS],
+        )
+    finally:
+        _restore_stderr(saved)
+
+
+def think(text: str) -> str:
+    state.signal = None
+    assert state.conversation is not None
+    saved = _suppress_stderr()
+    try:
+        response = state.conversation.send_message(text)
+    finally:
+        _restore_stderr(saved)
+    if state.signal:
+        return state.signal
+    content = response.get("content", [])
+    if isinstance(content, list):
+        return "".join(c.get("text", "") for c in content if c.get("type") == "text")
+    return str(content)
 
 
 def dump_history(history: list):
@@ -210,15 +241,17 @@ def speak(text: str):
             raise
 
 
-def respond(history: list) -> str | None:
+def respond(text: str, history: list) -> str | None:
     start_music()
     try:
-        return think(history)
+        return think(text)
     except KeyboardInterrupt:
-        if _exit_requested.is_set():
+        if state.exit_requested.is_set():
             dump_history(history)
             log("interrupt", "exiting...")
             divider()
+            state.conversation = None
+            lm_cleanup()
             raise SystemExit(0)
         log("interrupt", "aborted, re-prompting...")
         return None
@@ -228,6 +261,7 @@ def respond(history: list) -> str | None:
 
 def main():
     threading.Thread(target=_watch_stdin, daemon=True).start()
+    _make_conversation()
     history = [{"role": "system", "content": SYSTEM_PROMPT}]
     awake = False
 
@@ -245,9 +279,7 @@ def main():
         if not text:
             continue
 
-        history.append({"role": "user", "content": text})
-        if (reply := respond(history)) is None:
-            history.pop()
+        if (reply := respond(text, history)) is None:
             continue
 
         match reply:
@@ -255,12 +287,15 @@ def main():
                 dump_history(history)
                 log("reset", "clearing conversation history...")
                 history = [{"role": "system", "content": SYSTEM_PROMPT}]
+                _make_conversation()
                 speak("Sure, starting fresh.")
 
             case "shutting_down":
                 dump_history(history)
                 log("speak", "shutting down...")
                 divider()
+                state.conversation = None
+                lm_cleanup()
                 subprocess.run(["afplay", "sounds/shutdown.mp3"])
                 break
 
@@ -270,6 +305,7 @@ def main():
 
             case _:
                 log("reply", f'"{reply}"')
+                history.append({"role": "user", "content": text})
                 history.append({"role": "assistant", "content": reply})
                 try:
                     speak(clean(reply))

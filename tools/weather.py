@@ -2,26 +2,12 @@ import subprocess
 import json
 from datetime import datetime
 
-DEFINITION = {
-    "type": "function",
-    "function": {
-        "name": "get_weather",
-        "description": "Get the current weather. Location is optional — auto-detects via IP if omitted.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "location": {
-                    "type": "string",
-                    "description": "The city or location to get weather for. Omit to auto-detect.",
-                }
-            },
-            "required": [],
-        },
-    },
-}
-
-
 def get_weather(location: str = "") -> str:
+    """Get the current weather. Location is optional — auto-detects via IP if omitted.
+
+    Args:
+        location: The city or location to get weather for. Omit to auto-detect.
+    """
     path = location.replace(" ", "+") if location else ""
     result = subprocess.run(
         ["curl", "-s", f"wttr.in/{path}?format=j1"],

@@ -13,7 +13,7 @@ def _fetch(title: str) -> str:
 
 def search_and_fetch(query: str) -> str:
     """Use Wikipedia's own search to find the best article for a query."""
-    results = wikipedia.search(query, results=3)
+    results = wikipedia.search(query, results=10)
     if not results:
         return f"No Wikipedia page found for '{query}'."
     for title in results:

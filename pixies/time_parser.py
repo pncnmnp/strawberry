@@ -1,5 +1,5 @@
 import json
-import ollama
+from lm import chat
 from datetime import datetime
 
 _SYSTEM = """You parse natural language time expressions into a JSON date range.
@@ -54,15 +54,8 @@ def _validate(data: dict, now: datetime) -> tuple[str | None, str | None]:
 def parse(time_range: str) -> tuple[str | None, str | None]:
     now = datetime.now()
     now_str = now.strftime("%Y-%m-%dT%H:%M:%S")
-    response = ollama.chat(
-        model="gemma4:e2b",
-        messages=[
-            {"role": "system", "content": _SYSTEM},
-            {"role": "user", "content": f"Now is {now_str}. Parse: {time_range}"},
-        ],
-    )
     try:
-        data = json.loads(response["message"]["content"].strip())
+        data = json.loads(chat(_SYSTEM, f"Now is {now_str}. Parse: {time_range}").strip())
         return _validate(data, now)
     except (json.JSONDecodeError, KeyError):
         return None, None
