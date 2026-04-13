@@ -20,6 +20,7 @@ _LABELS: dict[str, tuple[str, str]] = {
     "interrupt": ("ABORT", "bold red"),
     "dump":   ("DUMP",    "dim magenta"),
     "wake":   ("WAKE",    "bold magenta"),
+    "music":  ("MUSIC",   "bold color(208)")
 }
 
 _last_time: float = time.perf_counter()

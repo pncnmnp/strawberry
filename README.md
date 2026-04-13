@@ -1,9 +1,10 @@
 # Strawberry
 
-My local voice assistant. Listens via microphone, transcribes with Whisper, thinks with Gemma via Ollama, speaks with Kokoro TTS.
+My local voice assistant. Listens via microphone, transcribes with Whisper, thinks with Gemma via LiteRT-LM, speaks with Kokoro TTS.
 
 ## What it can do
 - Answer questions (Wikipedia or DuckDuckGo, auto-routed)
+- Play music (requires `MUSIC_DIR` in `config.local.py`)
 - Check weather
 - Save and recall personal notes with keyword, tag, and time-range search
 - Reset conversation history
@@ -11,7 +12,7 @@ My local voice assistant. Listens via microphone, transcribes with Whisper, thin
 
 ## Stack
 - **STT**: Faster Whisper (`base`)
-- **LLM**: `gemma4:e2b` via Ollama (100% GPU on Apple Silicon)
+- **LLM**: Gemma via LiteRT-LM (100% GPU on Apple Silicon)
 - **TTS**: Kokoro (`af_heart` voice)
 - **Search**: Wikipedia + DuckDuckGo
 - **Notes**: SQLite FTS5 with stemming, time parsing, and query expansion

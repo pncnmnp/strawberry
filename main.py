@@ -22,6 +22,7 @@ from typing import Any
 
 from prompts.mk1 import SYSTEM_PROMPT
 from tools import TOOL_FUNCTIONS
+from tools.music import _alive as _music_alive, _kill_stale as _music_kill_stale
 from lm import get_engine, cleanup as lm_cleanup, _suppress_stderr, _restore_stderr
 from log import log, divider
 
@@ -120,10 +121,10 @@ def wait_for_wake_word():
             return stream  # keep stream open so listen() can use it immediately
 
 
-def record_until_silence(stream=None):
+def record_until_silence(stream=None, max_duration=MAX_DURATION):
     chunk_size = int(SAMPLE_RATE * CHUNK_DURATION)
     silence_chunks_needed = int(SILENCE_DURATION / CHUNK_DURATION)
-    max_chunks = int(MAX_DURATION / CHUNK_DURATION)
+    max_chunks = int(max_duration / CHUNK_DURATION)
     pre_speech_chunks = int(PRE_SPEECH_TIMEOUT / CHUNK_DURATION)
 
     frames = []
@@ -219,8 +220,11 @@ def dump_history(history: list):
 
 
 def listen(stream=None) -> str | None:
+    # HACK: music bleeds into the mic, causing whisper to keep "hearing" audio and
+    # never hit the silence threshold — so we clamp the window hard when VLC is running.
+    max_dur = 7 if _music_alive() else MAX_DURATION
     log("listen", "waiting for speech...")
-    audio = record_until_silence(stream)
+    audio = record_until_silence(stream, max_duration=max_dur)
     if stream:
         stream.stop()
         stream.close()
@@ -308,6 +312,7 @@ def main():
                 dump_history(history)
                 log("speak", "shutting down...")
                 divider()
+                _music_kill_stale()
                 state.conversation = None
                 lm_cleanup()
                 subprocess.run(["afplay", "sounds/shutdown.mp3"])
