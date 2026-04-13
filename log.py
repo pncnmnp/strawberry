@@ -31,6 +31,20 @@ def divider():
     console.print(Rule(style="dim"))
     _last_time = time.perf_counter()
 
+# NOTE: Is this accurate?
+# https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm
+# Somewhat. We use chars // 4 as a rough token estimate, which misses chat template overhead
+# (~16 tokens/turn for role markers) and JSON scaffolding around tool calls. So we undercount
+# by maybe 200-400 tokens. But the model also seems to degrade in quality well before the KV
+# cache is actually full (~3K tokens), some limitation somewhere that I am overlooking rn.
+def log_context(history: list, total: int = 4096, tool_chars: int = 0):
+    used = (sum(len(m["content"]) for m in history if isinstance(m.get("content"), str)) + tool_chars) // 4
+    pct = min(used / total, 1.0)
+    filled = int(pct * 20)
+    bar = "█" * filled + "░" * (20 - filled)
+    color = "green" if pct < 0.6 else "yellow" if pct < 0.85 else "bold red"
+    console.print(f"  [dim]CONTEXT [/dim]  [{color}]{bar}[/{color}]  [dim]{used}/{total} tokens[/dim]")
+
 
 def log(kind: str, message: str = ""):
     global _last_time

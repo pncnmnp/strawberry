@@ -30,11 +30,17 @@ def _restore_stderr(saved_fd):
 def _quiet_engine(path: str) -> litert_lm.Engine:
     saved_fd = _suppress_stderr()
     try:
-        return litert_lm.Engine(path)
+        return litert_lm.Engine(path, max_num_tokens=4096)
     finally:
         _restore_stderr(saved_fd)
 
-
+# NOTE: Why are we not using audio input since the model is multimodal?
+# I tried it. The problem is that audio tokens are orders of magnitude larger than
+# text tokens. In a multi-turn conversation the KV cache fills up within a few turns,
+# after which the model produces degenerate single-token outputs ("A", "The", "I", "").
+# Whisper transcribes each utterance to ~10-50 text tokens instead, so the context
+# stays manageable across a long session.
+# Audio input drastically decreases the latency (~1 sec), but is only practical for single-turn or short-session use.
 def get_engine() -> litert_lm.Engine:
     """Engine for the main conversation session."""
     global _engine

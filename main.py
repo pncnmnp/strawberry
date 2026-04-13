@@ -24,7 +24,7 @@ from prompts.mk1 import SYSTEM_PROMPT
 from tools import TOOL_FUNCTIONS
 from tools.music import _alive as _music_alive, _kill_stale as _music_kill_stale
 from lm import get_engine, cleanup as lm_cleanup, _suppress_stderr, _restore_stderr
-from log import log, divider
+from log import log, log_context, divider
 
 SAMPLE_RATE = 16000        # samples per second
 CHUNK_DURATION = 0.1       # seconds per chunk
@@ -53,6 +53,7 @@ class AppState:
     music_thread: threading.Thread | None = None
     music_stop: threading.Event = field(default_factory=threading.Event)
     exit_requested: threading.Event = field(default_factory=threading.Event)
+    tool_chars: int = 0  # cumulative chars from tool calls + results (not in history)
 
 
 state = AppState()
@@ -168,11 +169,13 @@ def _wrap_tool(fn):
     """Wrap a tool function to log calls and capture signal returns."""
     @wraps(fn)
     def wrapper(*args, **kwargs):
+        call_str = f"{fn.__name__} {json.dumps(kwargs or list(args))}"
         log("tool", f"{fn.__name__}  {kwargs or args}")
         result = fn(*args, **kwargs)
         log("result", str(result)[:1000])
         if result in SIGNALS:
             state.signal = result
+        state.tool_chars += len(call_str) + len(str(result))
         return result
     return wrapper
 
@@ -305,6 +308,8 @@ def main():
                 dump_history(history)
                 log("reset", "clearing conversation history...")
                 history = [{"role": "system", "content": SYSTEM_PROMPT}]
+                state.tool_chars = 0
+                state.conversation = None
                 _make_conversation()
                 speak("Sure, starting fresh.")
 
@@ -326,6 +331,7 @@ def main():
                 log("reply", f'"{reply}"')
                 history.append({"role": "user", "content": text})
                 history.append({"role": "assistant", "content": reply})
+                log_context(history, tool_chars=state.tool_chars)
                 try:
                     speak(clean(reply))
                 except KeyboardInterrupt:
