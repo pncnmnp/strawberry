@@ -1,5 +1,6 @@
 from rich.console import Console
 from rich.rule import Rule
+import inspect
 import time
 
 console = Console(highlight=False)
@@ -31,14 +32,23 @@ def divider():
     console.print(Rule(style="dim"))
     _last_time = time.perf_counter()
 
+_tool_schema_tokens: int = 0
+
+def compute_tool_schema_tokens(tools: list) -> None:
+    """Call once at startup with the tool functions to measure their schema overhead."""
+    global _tool_schema_tokens
+    total = 0
+    for fn in tools:
+        doc = inspect.getdoc(fn) or ""
+        total += len(f"{fn.__name__} {doc} {inspect.signature(fn)}")
+    _tool_schema_tokens = total // 4
+
 # NOTE: Is this accurate?
 # https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm
-# Somewhat. We use chars // 4 as a rough token estimate, which misses chat template overhead
-# (~16 tokens/turn for role markers) and JSON scaffolding around tool calls. So we undercount
-# by maybe 200-400 tokens. But the model also seems to degrade in quality well before the KV
-# cache is actually full (~3K tokens), some limitation somewhere that I am overlooking rn.
-def log_context(history: list, total: int = 4096, tool_chars: int = 0):
-    used = (sum(len(m["content"]) for m in history if isinstance(m.get("content"), str)) + tool_chars) // 4
+# Somewhat. We use chars // 4 as a rough token estimate.
+def log_context(history: list, total: int = 16384, tool_chars: int = 0):
+    turn_overhead = len(history) * 6  # <|turn>role\n...<turn|>\n per message
+    used = (sum(len(m["content"]) for m in history if isinstance(m.get("content"), str)) + tool_chars) // 4 + _tool_schema_tokens + turn_overhead
     pct = min(used / total, 1.0)
     filled = int(pct * 20)
     bar = "█" * filled + "░" * (20 - filled)

@@ -28,7 +28,7 @@ from prompts.mk1 import SYSTEM_PROMPT
 from tools import TOOL_FUNCTIONS
 from tools.music import _alive as _music_alive, _kill_stale as _music_kill_stale
 from lm import get_engine, cleanup as lm_cleanup, _suppress_stderr, _restore_stderr
-from log import log, log_context, divider
+from log import log, log_context, divider, compute_tool_schema_tokens
 
 # For sentence tokenization
 nltk.download("punkt_tab", quiet=True)
@@ -371,6 +371,7 @@ def respond(text: str, history: list) -> str | None:
 
 def main():
     threading.Thread(target=_watch_stdin, daemon=True).start()
+    compute_tool_schema_tokens(TOOL_FUNCTIONS)
     _make_conversation()
     history = [{"role": "system", "content": SYSTEM_PROMPT}]
     awake = False

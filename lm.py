@@ -27,10 +27,16 @@ def _restore_stderr(saved_fd):
     os.close(saved_fd)
 
 
+# NOTE: Gemma 4 E2B supports 128K context but uses a 4:1 local-to-global attention pattern —
+# 4 layers of 512-token sliding window followed by 1 global layer. 
+# Local layers (4/5) only cache 512 tokens regardless of context length, so per-layer KV cache is fixed.
+# Only the global layers (1/5) scale with context, and those use 8:1 GQA + K=V sharing.
+# https://newsletter.maartengrootendorst.com/p/a-visual-guide-to-gemma-4
+# 16K is comfortable on 16GB RAM.
 def _quiet_engine(path: str) -> litert_lm.Engine:
     saved_fd = _suppress_stderr()
     try:
-        return litert_lm.Engine(path, max_num_tokens=4096)
+        return litert_lm.Engine(path, max_num_tokens=16384)
     finally:
         _restore_stderr(saved_fd)
 
