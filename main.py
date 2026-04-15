@@ -13,6 +13,7 @@ from faster_whisper import WhisperModel
 import numpy as np
 import json
 import re
+import queue
 import threading
 import subprocess
 from dataclasses import dataclass, field
@@ -20,11 +21,17 @@ from datetime import datetime
 from functools import wraps
 from typing import Any
 
+import nltk
+from nltk.tokenize import sent_tokenize
+
 from prompts.mk1 import SYSTEM_PROMPT
 from tools import TOOL_FUNCTIONS
 from tools.music import _alive as _music_alive, _kill_stale as _music_kill_stale
 from lm import get_engine, cleanup as lm_cleanup, _suppress_stderr, _restore_stderr
 from log import log, log_context, divider
+
+# For sentence tokenization
+nltk.download("punkt_tab", quiet=True)
 
 SAMPLE_RATE = 16000        # samples per second
 CHUNK_DURATION = 0.1       # seconds per chunk
@@ -191,21 +198,6 @@ def _make_conversation():
         _restore_stderr(saved)
 
 
-def think(text: str) -> str:
-    state.signal = None
-    assert state.conversation is not None
-    saved = _suppress_stderr()
-    try:
-        response = state.conversation.send_message(text)
-    finally:
-        _restore_stderr(saved)
-    if state.signal:
-        return state.signal
-    content = response.get("content", [])
-    if isinstance(content, list):
-        return "".join(c.get("text", "") for c in content if c.get("type") == "text")
-    return str(content)
-
 
 def dump_history(history: list):
     os.makedirs("history", exist_ok=True)
@@ -240,6 +232,14 @@ def listen(stream=None) -> str | None:
     return text
 
 
+def _split_sentence(buf: str) -> tuple[str, str]:
+    """Split off the first complete sentence using Punkt. Returns (sentence, remainder)."""
+    sentences = sent_tokenize(buf)
+    if len(sentences) < 2:
+        return "", buf
+    return sentences[0], buf[len(sentences[0]):].lstrip()
+
+
 def clean(text: str) -> str:
     text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)  # **bold**
     text = re.sub(r'\*(.+?)\*', r'\1', text)       # *italic*
@@ -262,10 +262,95 @@ def speak(text: str):
 
 
 def respond(text: str, history: list) -> str | None:
+    state.signal = None
+    assert state.conversation is not None
+
+    sentence_queue: queue.Queue = queue.Queue()
+    audio_queue: queue.Queue = queue.Queue()
+    stop_event = threading.Event()
+    full_text = "" # what it said in total, for logging
+    exc: Exception | None = None
+    _ERROR = object()
+
+    def _produce():
+        nonlocal full_text, exc
+        buf = ""
+        saved = _suppress_stderr()
+        try:
+            for chunk in state.conversation.send_message_async(text):
+                if stop_event.is_set():
+                    break
+                content = chunk.get("content", [])
+                token = ""
+                if isinstance(content, list):
+                    token = "".join(c.get("text", "") for c in content if c.get("type") == "text")
+                elif isinstance(content, str):
+                    token = content
+                if not token:
+                    continue
+                buf += token
+                full_text += token
+                sentence, buf = _split_sentence(buf)
+                if sentence:
+                    sentence_queue.put(sentence)
+            if buf.strip() and not stop_event.is_set():
+                sentence_queue.put(buf.strip())
+        except Exception as e:
+            exc = e
+            sentence_queue.put(_ERROR)
+        finally:
+            _restore_stderr(saved)
+            sentence_queue.put(None)
+
+    def _synthesize():
+        try:
+            while True:
+                sentence = sentence_queue.get()
+                if sentence is None:
+                    break
+                if sentence is _ERROR:
+                    audio_queue.put(_ERROR)
+                    return
+                for _, _, audio in tts(clean(sentence), voice="af_heart"):
+                    if stop_event.is_set():
+                        break
+                    audio_queue.put(audio)
+        finally:
+            audio_queue.put(None)
+
+    producer = threading.Thread(target=_produce, daemon=True)
+    synthesizer = threading.Thread(target=_synthesize, daemon=True)
     start_music()
+    producer.start()
+    synthesizer.start()
+
     try:
-        return think(text)
+        while True:
+            chunk = audio_queue.get()
+            if chunk is None:
+                break
+            if chunk is _ERROR:
+                raise exc or RuntimeError("unknown producer error")
+            stop_music()
+            sd.play(chunk, samplerate=24000)
+            while sd.get_stream().active:
+                time.sleep(0.05)
+
+        if state.signal:
+            return state.signal
+
+        return full_text or None
+
     except KeyboardInterrupt:
+        stop_event.set()
+        try:
+            state.conversation.cancel_process()
+        except Exception:
+            pass
+        sd.stop()
+        producer.join()
+        synthesizer.join()
+
         if state.exit_requested.is_set():
             dump_history(history)
             log("interrupt", "exiting...")
@@ -277,6 +362,11 @@ def respond(text: str, history: list) -> str | None:
         return None
     finally:
         stop_music()
+        if producer.is_alive():
+            stop_event.set()
+            producer.join()
+        if synthesizer.is_alive():
+            synthesizer.join()
 
 
 def main():
@@ -332,12 +422,6 @@ def main():
                 history.append({"role": "user", "content": text})
                 history.append({"role": "assistant", "content": reply})
                 log_context(history, tool_chars=state.tool_chars)
-                try:
-                    speak(clean(reply))
-                except KeyboardInterrupt:
-                    log("interrupt", "speech interrupted, re-prompting...")
-                    continue
-                log("speak", f"playing response...")
 
 if __name__ == "__main__":
     main()

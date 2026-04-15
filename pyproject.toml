@@ -8,6 +8,7 @@ dependencies = [
     "ddgs>=9.12.1",
     "faster-whisper>=1.2.1",
     "kokoro>=0.9.4",
+    "nltk>=3.9.4",
     "numpy>=2.4.4",
     "ollama>=0.6.1",
     "sounddevice>=0.5.5",
