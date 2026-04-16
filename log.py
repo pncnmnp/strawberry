@@ -3,6 +3,8 @@ from rich.rule import Rule
 import inspect
 import time
 
+from lm import MAX_TOKENS
+
 console = Console(highlight=False)
 
 _LABELS: dict[str, tuple[str, str]] = {
@@ -21,7 +23,8 @@ _LABELS: dict[str, tuple[str, str]] = {
     "interrupt": ("ABORT", "bold red"),
     "dump":   ("DUMP",    "dim magenta"),
     "wake":   ("WAKE",    "bold magenta"),
-    "music":  ("MUSIC",   "bold color(208)")
+    "music":  ("MUSIC",   "bold color(208)"),
+    "compact":("COMPACT", "bold magenta"),
 }
 
 _last_time: float = time.perf_counter()
@@ -46,10 +49,18 @@ def compute_tool_schema_tokens(tools: list) -> None:
 # NOTE: Is this accurate?
 # https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm
 # Somewhat. We use chars // 4 as a rough token estimate.
-def log_context(history: list, total: int = 16384, tool_chars: int = 0):
+def _usage(history: list, tool_chars: int, total: int) -> tuple[int, float]:
     turn_overhead = len(history) * 6  # <|turn>role\n...<turn|>\n per message
     used = (sum(len(m["content"]) for m in history if isinstance(m.get("content"), str)) + tool_chars) // 4 + _tool_schema_tokens + turn_overhead
-    pct = min(used / total, 1.0)
+    return used, min(used / total, 1.0)
+
+
+def context_pct(history: list, tool_chars: int = 0, total: int = MAX_TOKENS) -> float:
+    return _usage(history, tool_chars, total)[1]
+
+
+def log_context(history: list, total: int = MAX_TOKENS, tool_chars: int = 0):
+    used, pct = _usage(history, tool_chars, total)
     filled = int(pct * 20)
     bar = "█" * filled + "░" * (20 - filled)
     color = "green" if pct < 0.6 else "yellow" if pct < 0.85 else "bold red"

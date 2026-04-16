@@ -1,3 +1,3 @@
 def shutdown() -> str:
-    """Shut down and exit the assistant when the user asks to sleep, wind down, stop, quit, exit, goodbye, or similar."""
+    """Fully exit the assistant process. Use for explicit termination: "shut down", "exit", "quit", "turn off", "power off"."""
     return "shutting_down"

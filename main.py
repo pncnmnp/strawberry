@@ -24,11 +24,12 @@ from typing import Any
 import nltk
 from nltk.tokenize import sent_tokenize
 
-from prompts.mk1 import SYSTEM_PROMPT
+from prompts.mk1 import SYSTEM_PROMPT, PRIOR_CONVERSATION
 from tools import TOOL_FUNCTIONS
 from tools.music import _alive as _music_alive, _kill_stale as _music_kill_stale
+from pixies import compact_history
 from lm import get_engine, cleanup as lm_cleanup, _suppress_stderr, _restore_stderr
-from log import log, log_context, divider, compute_tool_schema_tokens
+from log import log, log_context, context_pct, divider, compute_tool_schema_tokens
 
 # For sentence tokenization
 nltk.download("punkt_tab", quiet=True)
@@ -39,6 +40,7 @@ SILENCE_THRESHOLD = 0.01   # RMS amplitude below this = silence
 SILENCE_DURATION = 1.5     # seconds of silence to stop recording
 MAX_DURATION = 30          # safety cap in seconds
 PRE_SPEECH_TIMEOUT = 10    # seconds to wait before any speech is detected
+COMPACT_THRESHOLD = 0.66   # context fraction that triggers auto-compaction
 
 whisper_model = WhisperModel("base.en", device="cpu", compute_type="int8")
 wake_model = WhisperModel("tiny.en", device="cpu", compute_type="int8")
@@ -187,15 +189,35 @@ def _wrap_tool(fn):
     return wrapper
 
 
-def _make_conversation():
+def _make_conversation(system: str = SYSTEM_PROMPT):
     saved = _suppress_stderr()
     try:
         state.conversation = get_engine().create_conversation(
-            messages=[{"role": "system", "content": [{"type": "text", "text": SYSTEM_PROMPT}]}],
+            messages=[{"role": "system", "content": [{"type": "text", "text": system}]}],
             tools=[_wrap_tool(fn) for fn in TOOL_FUNCTIONS],
         )
     finally:
         _restore_stderr(saved)
+
+
+def _reset_history(system: str = SYSTEM_PROMPT) -> list:
+    state.tool_chars = 0
+    state.conversation = None
+    _make_conversation(system)
+    return [{"role": "system", "content": system}]
+
+
+def _compact(history: list) -> list:
+    log("compact", f"above threshold of {int(COMPACT_THRESHOLD * 100)} — auto-compacting...")
+    speak("We're past the context threshold, Sir. Running auto-compaction — one moment.")
+    start_music()
+    try:
+        summary = compact_history(history)
+    finally:
+        stop_music()
+    dump_history(history)
+    log("compact", summary.replace("\n", " / "))
+    return _reset_history(SYSTEM_PROMPT + PRIOR_CONVERSATION.format(summary=summary))
 
 
 
@@ -391,6 +413,9 @@ def main():
         if not text:
             continue
 
+        if context_pct(history, state.tool_chars) >= COMPACT_THRESHOLD:
+            history = _compact(history)
+
         if (reply := respond(text, history)) is None:
             continue
 
@@ -398,10 +423,7 @@ def main():
             case "resetting":
                 dump_history(history)
                 log("reset", "clearing conversation history...")
-                history = [{"role": "system", "content": SYSTEM_PROMPT}]
-                state.tool_chars = 0
-                state.conversation = None
-                _make_conversation()
+                history = _reset_history()
                 speak("Sure, starting fresh.")
 
             case "shutting_down":

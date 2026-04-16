@@ -7,6 +7,7 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "4")
 import litert_lm
 
 MODEL_PATH = "/Users/parth/.litert-lm/models/gemma-e2b/model.litertlm"
+MAX_TOKENS = 16384
 
 _engine = None
 _pixie_engine = None
@@ -36,7 +37,7 @@ def _restore_stderr(saved_fd):
 def _quiet_engine(path: str) -> litert_lm.Engine:
     saved_fd = _suppress_stderr()
     try:
-        return litert_lm.Engine(path, max_num_tokens=16384)
+        return litert_lm.Engine(path, max_num_tokens=MAX_TOKENS)
     finally:
         _restore_stderr(saved_fd)
 
