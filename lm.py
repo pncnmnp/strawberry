@@ -88,3 +88,39 @@ def chat(system: str, user: str) -> str:
     if isinstance(content, list):
         return "".join(c.get("text", "") for c in content if c.get("type") == "text")
     return str(content)
+
+
+def think(system: str, question: str) -> dict:
+    """One-shot thinking chat. Returns {"thought": ..., "response": ...}.
+
+    To enable thinking, include <|think|> at the start of the system prompt or message.
+    See: https://huggingface.co/google/gemma-4-E2B
+
+    Why a separate tool call instead of per-message <|think|>?
+    - Per-message <|think|> in multi-turn is unreliable: thinking bleeds across turns,
+      causing the model to think even when not prompted.
+    - System-prompt <|think|> works but configures the entire session for thinking,
+      increasing average latency on every turn.
+    - Per-message <|think|> in isolated (single-turn) conversations is reliable.
+
+    Verified experimentally.
+    So we spin up a fresh tool-based conversation per thinking request.
+    """
+    engine = _get_pixie_engine()
+    saved = _suppress_stderr()
+    try:
+        with engine.create_conversation(
+            messages=[
+                {"role": "system", "content": [{"type": "text", "text": "<|think|>\n" + system}]}
+            ],
+        ) as conv:
+            response = conv.send_message(question)
+    finally:
+        _restore_stderr(saved)
+    thought = response.get("channels", {}).get("thought", "")
+    content = response.get("content", [])
+    if isinstance(content, list):
+        text = "".join(c.get("text", "") for c in content if c.get("type") == "text")
+    else:
+        text = str(content)
+    return {"thought": thought, "response": text}

@@ -24,3 +24,4 @@ config.local.py
 
 # Temporary files
 default.profraw
+junk/

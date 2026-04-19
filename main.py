@@ -266,7 +266,7 @@ def clean(text: str) -> str:
     text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)  # **bold**
     text = re.sub(r'\*(.+?)\*', r'\1', text)       # *italic*
     text = re.sub(r'#+\s*', '', text)              # ## headings
-    text = re.sub(r'^\d+\.\s*', '', text, flags=re.MULTILINE)  # numbered lists
+    text = re.sub(r'^\d+\.\s+', '', text, flags=re.MULTILINE)  # numbered lists
     text = re.sub(r'\n+', ' ', text)               # newlines → space
     text = re.sub(r'\s{2,}', ' ', text)            # collapse spaces
     return text.strip()
