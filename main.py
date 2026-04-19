@@ -395,10 +395,22 @@ def respond(text: str, history: list) -> str | None:
             synthesizer.join()
 
 
+def _warmup():
+    """Force system-prompt + tool-schema prefill so first reply is fast."""
+    log("warmup", "warming up llm...")
+    saved = _suppress_stderr()
+    try:
+        state.conversation.send_message("hi")
+    finally:
+        _restore_stderr(saved)
+    log("warmup", "llm warmup done")
+
+
 def main():
     threading.Thread(target=_watch_stdin, daemon=True).start()
     compute_tool_schema_tokens(TOOL_FUNCTIONS)
     _make_conversation()
+    _warmup()
     history = [{"role": "system", "content": SYSTEM_PROMPT}]
     awake = False
 

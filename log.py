@@ -23,6 +23,7 @@ _LABELS: dict[str, tuple[str, str]] = {
     "interrupt": ("ABORT", "bold red"),
     "dump":   ("DUMP",    "dim magenta"),
     "wake":   ("WAKE",    "bold magenta"),
+    "warmup": ("WARMUP",  "bold color(135)"),
     "music":  ("MUSIC",   "bold color(208)"),
     "compact":("COMPACT", "bold magenta"),
 }

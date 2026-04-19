@@ -36,6 +36,8 @@ def _restore_stderr(saved_fd):
 # 16K is comfortable on 16GB RAM.
 def _quiet_engine(path: str) -> litert_lm.Engine:
     saved_fd = _suppress_stderr()
+    # TODO: GPU backend is ~4x faster but corrupts token sampling — "Don't" becomes
+    # "You't", tool args get mangled, math breaks. Revisit when LiteRT-LM fixes GPU accuracy.
     try:
         return litert_lm.Engine(path, max_num_tokens=MAX_TOKENS)
     finally:
