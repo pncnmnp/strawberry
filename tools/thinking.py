@@ -1,7 +1,8 @@
 from lm import think
-from prompts.mk1 import SYSTEM_PROMPT
 
-def deep_think(question: str) -> str:
+_THINK_PROMPT = "You are the reasoning engine behind a real-time voice assistant. Think through the problem carefully and provide a clear, well-reasoned answer."
+
+def deep_think(question: str) -> dict:
     """Engage extended reasoning for problems that require multi-step logic, math, analysis, or planning.
     Do NOT use this for simple factual recall, greetings, or anything answerable in one step.
     Latency is high — only invoke when the quality gain justifies the wait.
@@ -9,5 +10,4 @@ def deep_think(question: str) -> str:
     Args:
         question: The full question or problem to reason through.
     """
-    result = think(SYSTEM_PROMPT, question)
-    return result["response"]
+    return think(_THINK_PROMPT, question)

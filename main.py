@@ -63,6 +63,7 @@ class AppState:
     music_stop: threading.Event = field(default_factory=threading.Event)
     exit_requested: threading.Event = field(default_factory=threading.Event)
     tool_chars: int = 0  # cumulative chars from tool calls + results (not in history)
+    last_thought: str | None = None
 
 
 state = AppState()
@@ -181,6 +182,9 @@ def _wrap_tool(fn):
         call_str = f"{fn.__name__} {json.dumps(kwargs or list(args))}"
         log("tool", f"{fn.__name__}  {kwargs or args}")
         result = fn(*args, **kwargs)
+        if isinstance(result, dict) and "thought" in result:
+            state.last_thought = result["thought"]
+            result = result["response"]
         log("result", str(result)[:1000])
         if result in SIGNALS:
             state.signal = result
@@ -443,6 +447,9 @@ def main():
             case _:
                 log("reply", f'"{reply}"')
                 history.append({"role": "user", "content": text})
+                if state.last_thought:
+                    history.append({"role": "assistant", "content": f"[Thought]\n{state.last_thought}"})
+                    state.last_thought = None
                 history.append({"role": "assistant", "content": reply})
                 log_context(history, tool_chars=state.tool_chars)
 
