@@ -27,6 +27,7 @@ from nltk.tokenize import sent_tokenize
 from prompts.mk1 import SYSTEM_PROMPT, PRIOR_CONVERSATION
 from tools import TOOL_FUNCTIONS
 from tools.music import _alive as _music_alive, _kill_stale as _music_kill_stale
+from tools.code import start as _sandbox_start
 from pixies import compact_history
 from lm import get_engine, cleanup as lm_cleanup, _suppress_stderr, _restore_stderr
 from log import log, log_context, context_pct, divider, compute_tool_schema_tokens
@@ -179,6 +180,7 @@ def _wrap_tool(fn):
     """Wrap a tool function to log calls and capture signal returns."""
     @wraps(fn)
     def wrapper(*args, **kwargs):
+        kwargs = {k: v.replace('<|"|>', "").replace("<|'|>", "").strip() if isinstance(v, str) else v for k, v in kwargs.items()}
         call_str = f"{fn.__name__} {json.dumps(kwargs or list(args))}"
         log("tool", f"{fn.__name__}  {kwargs or args}")
         result = fn(*args, **kwargs)
@@ -410,7 +412,10 @@ def main():
     threading.Thread(target=_watch_stdin, daemon=True).start()
     compute_tool_schema_tokens(TOOL_FUNCTIONS)
     _make_conversation()
+    sandbox_thread = threading.Thread(target=_sandbox_start, daemon=True)
+    sandbox_thread.start()
     _warmup()
+    sandbox_thread.join()
     history = [{"role": "system", "content": SYSTEM_PROMPT}]
     awake = False
 

@@ -7,6 +7,8 @@ from tools.mute import mute
 from tools.date_time import get_current_datetime
 from tools.music import music_play, music_control, music_set_volume, music_now_playing, music_search_library
 from tools.thinking import deep_think
+from tools.code import run_python, install_package
 
 TOOL_FUNCTIONS = [get_weather, shutdown, reset_history, search, save_note, recall_notes, mute, get_current_datetime,
-                  music_play, music_control, music_set_volume, music_now_playing, music_search_library, deep_think]
+                  music_play, music_control, music_set_volume, music_now_playing, music_search_library, deep_think,
+                  run_python, install_package]
