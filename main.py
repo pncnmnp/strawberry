@@ -43,7 +43,10 @@ MAX_DURATION = 30          # safety cap in seconds
 PRE_SPEECH_TIMEOUT = 10    # seconds to wait before any speech is detected
 COMPACT_THRESHOLD = 0.66   # context fraction that triggers auto-compaction
 
-whisper_model = WhisperModel("base.en", device="cpu", compute_type="int8")
+# NOTE: small.en is about 3x slower (~1.2 sec) than base.en (~400 ms).
+# However, we have made a lot of optimizations elsewhere, to enable this faster model.
+# Frankly, the quality of base.en sucks. small.en is a tad bit better.
+whisper_model = WhisperModel("small.en", device="cpu", compute_type="int8")
 wake_model = WhisperModel("tiny.en", device="cpu", compute_type="int8")
 
 WAKE_PHRASE = "hey strawberry"

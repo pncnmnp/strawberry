@@ -1,10 +1,12 @@
-import subprocess, random, urllib.request, urllib.parse, base64, json, time, tempfile, os, re
+import subprocess, random, urllib.request, urllib.parse, base64, json, time, tempfile, os, re, sqlite3
 from pathlib import Path
 from log import log
+import mutagen  # type: ignore[attr-defined]
 
 VLC = "/Applications/VLC.app/Contents/MacOS/VLC"
 HOST, PORT, PASS = "127.0.0.1", 8765, "strawberry"
 EXTS = {".mp3", ".flac", ".m4a", ".aac", ".wav", ".ogg", ".opus"}
+DB_PATH = Path(__file__).parent.parent / "music.db"
 
 _proc = None
 _m3u = None
@@ -16,12 +18,73 @@ def _dir() -> str | None:
     exec(p.read_text(), ns)
     return ns.get("MUSIC_DIR")
 
-def _scan():
-    d = _dir()
-    return sorted(f for ext in EXTS for f in Path(d).rglob(f"*{ext}")) if d else []
+def _db() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("""CREATE TABLE IF NOT EXISTS tracks (
+        path TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        artist TEXT NOT NULL DEFAULT '',
+        album TEXT NOT NULL DEFAULT '',
+        mtime REAL NOT NULL
+    )""")
+    return conn
 
-def _index():
-    return [{"path": f, "title": f.stem, "album": f.parent.name, "artist": f.parent.parent.name} for f in _scan()]
+def _read_tags(path: Path) -> dict:
+    """Read ID3/metadata tags from an audio file using mutagen."""
+    title, artist, album = path.stem, "", ""
+    try:
+        f = mutagen.File(path, easy=True)  # type: ignore[attr-defined]
+        if f:
+            title = (f.get("title") or [path.stem])[0]
+            artist = (f.get("artist") or [""])[0]
+            album = (f.get("album") or [""])[0]
+    except Exception:
+        pass
+    # mtime - time of most recent content modification
+    return {"path": str(path), "title": title, "artist": artist, "album": album, "mtime": path.stat().st_mtime}
+
+def _build_index() -> int:
+    """Scan MUSIC_DIR, read tags, populate the DB. Returns track count."""
+    d = _dir()
+    if not d: return 0
+    files = sorted(f for ext in EXTS for f in Path(d).rglob(f"*{ext}"))
+    conn = _db()
+    # grab existing mtimes so we only re-read changed files
+    existing = {r["path"]: r["mtime"] for r in conn.execute("SELECT path, mtime FROM tracks").fetchall()}
+    current_paths = set()
+    batch = []
+    for f in files:
+        p = str(f)
+        current_paths.add(p)
+        mt = f.stat().st_mtime
+        if p in existing and existing[p] == mt:
+            continue
+        batch.append(_read_tags(f))
+    # upsert changed/new tracks
+    if batch:
+        conn.executemany(
+            "INSERT OR REPLACE INTO tracks (path, title, artist, album, mtime) VALUES (:path, :title, :artist, :album, :mtime)",
+            batch)
+    # remove tracks whose files no longer exist
+    stale = set(existing) - current_paths
+    if stale:
+        conn.executemany("DELETE FROM tracks WHERE path = ?", [(p,) for p in stale])
+    conn.commit()
+    count = conn.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
+    conn.close()
+    return count
+
+def _ensure_db():
+    """Build the index if the DB doesn't exist or is empty."""
+    if not DB_PATH.exists():
+        _build_index()
+        return
+    conn = _db()
+    count = conn.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
+    conn.close()
+    if count == 0:
+        _build_index()
 
 def _api(cmd="", **kw) -> dict:
     url = f"http://{HOST}:{PORT}/requests/status.json"
@@ -35,19 +98,39 @@ def _api(cmd="", **kw) -> dict:
 
 _GENERIC = {"", "all", "any", "everything", "anything", "random", "music", "some music", "library"}
 
+def _word_match_clause(query: str) -> tuple[str, list[str]]:
+    """Build a WHERE clause that requires every word in the query to appear
+    somewhere across title, artist, album, or path. Returns (sql, params).
+    e.g. "Music Man" -> each word must independently match at least one column.
+    This handles smashed-together tags like 'MusicManChannel'.
+    """
+    words = query.lower().split()
+    if not words: return "1=1", []
+    clauses, params = [], []
+    for w in words:
+        p = f"%{w}%"
+        clauses.append("(LOWER(title) LIKE ? OR LOWER(artist) LIKE ? OR LOWER(album) LIKE ? OR LOWER(path) LIKE ?)")
+        params.extend([p, p, p, p])
+    return " AND ".join(clauses), params
+
 def _clean(s: str) -> str:
     """Strip model special tokens (e.g. Gemma's <|"|>) and whitespace."""
     return re.sub(r"<\|[^|]*\|>", "", s).strip()
 
 def _alive() -> bool:
-    return bool(_proc and _proc.poll() is None and "error" not in _api())
+    """Check if VLC is responding on our HTTP port — works even across Python restarts."""
+    return "error" not in _api()
 
 def _kill_stale():
-    """Kill any lingering VLC processes from previous sessions using our port.
-    This is IMPORTANT, else, we are not able to reliably perform actions.
+    """Kill whatever is holding our HTTP control port.
+    lsof -ti :PORT is definitive — no regex guessing about command lines.
     """
-    subprocess.run(["pkill", "-f", f"{VLC}.*--http-port={PORT}"],
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    result = subprocess.run(["lsof", "-ti", f":{PORT}"],
+                            capture_output=True, text=True)
+    for pid in result.stdout.split():
+        subprocess.run(["kill", "-9", pid],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(0.3)  # let the port actually free up
 
 def _launch(files, shuffle=False):
     global _proc, _m3u
@@ -85,10 +168,17 @@ def music_play(query: str = "", shuffle: bool = False) -> str:
         shuffle: Shuffle the matching tracks.
     """
     if not _dir(): return "Set MUSIC_DIR in config.local.py first."
+    _ensure_db()
     query = _clean(query)
     if query.lower() in _GENERIC: query = ""
-    q = query.lower()
-    files = [e["path"] for e in _index() if not q or q in e["title"].lower() or q in e["album"].lower() or q in e["artist"].lower()]
+    conn = _db()
+    if query:
+        where, params = _word_match_clause(query)
+        rows = conn.execute(f"SELECT path FROM tracks WHERE {where}", params).fetchall()
+    else:
+        rows = conn.execute("SELECT path FROM tracks").fetchall()
+    conn.close()
+    files = [r["path"] for r in rows]
     if not files: return f"Nothing matched '{query}'."
     log("music", f"play '{query}' shuffle={shuffle} n={len(files)}")
     if _alive():
@@ -153,24 +243,44 @@ def music_search_library(query: str, filter_by: str = "all") -> str:
         filter_by: Narrow results — 'artist', 'album', 'song', or 'all' (default).
     """
     if not _dir(): return "Set MUSIC_DIR in config.local.py first."
+    _ensure_db()
     query = _clean(query)
     filter_by = _clean(filter_by)
     if query.lower() in _GENERIC: query = ""
-    q, idx = query.lower(), _index()
+    conn = _db()
+    where, params = _word_match_clause(query) if query else ("1=1", [])
     match filter_by:
-        case "artist": hits = sorted({e["artist"] for e in idx if q in e["artist"].lower()} - {""})
-        case "album":  hits = sorted({f"{e['artist']} — {e['album']}" for e in idx if q in e["album"].lower()})
+        case "artist":
+            rows = conn.execute(f"SELECT DISTINCT artist FROM tracks WHERE artist != '' AND {where}", params).fetchall()
+            hits = sorted(r["artist"] for r in rows)
+        case "album":
+            rows = conn.execute(f"SELECT DISTINCT artist, album FROM tracks WHERE {where}", params).fetchall()
+            hits = sorted(f"{r['artist']} — {r['album']}" for r in rows)
         case "song":
-            all_hits = sorted({e["title"] for e in idx if q in e["title"].lower()})
+            rows = conn.execute(f"SELECT DISTINCT title FROM tracks WHERE {where}", params).fetchall()
+            all_hits = sorted(r["title"] for r in rows)
             hits = random.sample(all_hits, min(10, len(all_hits)))
         case _:
-            artists = sorted({e["artist"] for e in idx if q in e["artist"].lower()} - {""})
-            albums  = sorted({f"{e['artist']} — {e['album']}" for e in idx if q in e["album"].lower()})
-            songs   = {e["title"] for e in idx if q in e["title"].lower()}
-            song_sample = random.sample(sorted(songs), min(10, len(songs)))
+            artists = sorted(r["artist"] for r in conn.execute(
+                f"SELECT DISTINCT artist FROM tracks WHERE artist != '' AND {where}", params).fetchall())
+            albums = sorted(f"{r['artist']} — {r['album']}" for r in conn.execute(
+                f"SELECT DISTINCT artist, album FROM tracks WHERE {where}", params).fetchall())
+            songs = [r["title"] for r in conn.execute(
+                f"SELECT DISTINCT title FROM tracks WHERE {where}", params).fetchall()]
+            song_sample = random.sample(sorted(songs), min(10, len(songs))) if songs else []
+            conn.close()
             return "\n".join(filter(None, [
-                ("Artists: " + ", ".join(artists))          if artists     else "",
-                ("Albums: "  + ", ".join(albums))           if albums      else "",
-                ("Some Random Songs: "   + ", ".join(song_sample))      if song_sample else "",
+                ("Artists: " + ", ".join(artists))       if artists     else "",
+                ("Albums: "  + ", ".join(albums))        if albums      else "",
+                ("Some Random Songs: " + ", ".join(song_sample)) if song_sample else "",
             ])) or f"Nothing found for '{query}'."
-    return "Artists, albums, and some random songs:\n" + "\n".join(hits) if hits else f"No results for '{query}'."
+    conn.close()
+    return "\n".join(hits) if hits else f"No results for '{query}'."
+
+
+def music_rebuild_index() -> str:
+    """Rebuild the music library index. Call this after adding or removing music files.
+    """
+    if not _dir(): return "Set MUSIC_DIR in config.local.py first."
+    count = _build_index()
+    return f"Index rebuilt: {count} tracks."

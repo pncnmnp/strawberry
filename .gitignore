@@ -16,6 +16,10 @@ history/
 notes.db
 notes.db-journal
 
+# Music library index
+music.db
+music.db-journal
+
 # macOS
 .DS_Store
 
