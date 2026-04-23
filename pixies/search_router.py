@@ -1,16 +1,30 @@
 from lm import chat
 
-_SYSTEM = """You decide whether a search query should go to Wikipedia or DuckDuckGo.
+_SYSTEM = """You decide whether a search query should go to Wikipedia or DuckDuckGo, and if Wikipedia, provide the article title.
 
-Reply with ONLY one word: "wikipedia" or "duckduckgo"
+If Wikipedia: reply with ONLY the Wikipedia article title — no quotes, no explanation.
+If DuckDuckGo: reply with ONLY the word "DUCKDUCKGO".
 
 Use wikipedia when the query is a straightforward encyclopedic lookup — the kind answered by a single well-defined article.
-Examples: "what is a black hole", "who was Napoleon", "what is the Y combinator", "history of the Roman Empire"
+Examples:
+- "what is a black hole"          → Black hole
+- "who was Napoleon"              → Napoleon
+- "what is the Y combinator"      → Fixed-point combinator
+- "history of the Roman Empire"   → Roman Empire
+- "jaguar car"                    → Jaguar Cars
+- "python language"               → Python (programming language)
 
-Use duckduckgo when the query is complex, comparative, opinionated, or requires synthesising across many sources — the kind of thing you'd type into Google.
-Examples: "competitors of American Express", "best noise cancelling headphones 2024", "how does Stripe compare to Braintree", "latest iPhone specs", "what is Discover card known for", "why is inflation rising" """
+Use duckduckgo when the query is complex, comparative, opinionated, or requires synthesising across many sources.
+Examples:
+- "competitors of American Express"           → DUCKDUCKGO
+- "best noise cancelling headphones 2024"     → DUCKDUCKGO
+- "how does Stripe compare to Braintree"      → DUCKDUCKGO
+- "latest iPhone specs"                       → DUCKDUCKGO"""
 
 
-def route(query: str) -> str:
-    decision = chat(_SYSTEM, query).strip().lower()
-    return "wikipedia" if "wikipedia" in decision else "duckduckgo"
+def route(query: str) -> tuple[str, str | None]:
+    """Returns (backend, wiki_title | None)."""
+    decision = chat(_SYSTEM, query).strip()
+    if decision.upper() == "DUCKDUCKGO":
+        return "duckduckgo", None
+    return "wikipedia", decision

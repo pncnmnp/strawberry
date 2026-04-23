@@ -8,9 +8,16 @@ import litert_lm
 
 MODEL_PATH = "/Users/parth/.litert-lm/models/gemma-e2b/model.litertlm"
 MAX_TOKENS = 16384
+# NOTE: Why is it low?
+# When the MAX TOKENS is set high for deep think calls, the latency can become unacceptably long.
+# We are talking about several minutes here.
+# As our deep think calls are solely used for single-use scenarios (i.e not part of a multi-turn conversation),
+# we can afford to do this to keep latency reasonable. An okay compromise for now.
+THINK_MAX_TOKENS = 4096
 
 _engine = None
 _pixie_engine = None
+_think_engine = None
 
 
 def _suppress_stderr():
@@ -34,12 +41,12 @@ def _restore_stderr(saved_fd):
 # Only the global layers (1/5) scale with context, and those use 8:1 GQA + K=V sharing.
 # https://newsletter.maartengrootendorst.com/p/a-visual-guide-to-gemma-4
 # 16K is comfortable on 16GB RAM.
-def _quiet_engine(path: str) -> litert_lm.Engine:
+def _quiet_engine(path: str, max_tokens: int = MAX_TOKENS) -> litert_lm.Engine:
     saved_fd = _suppress_stderr()
     # TODO: GPU backend is ~4x faster but corrupts token sampling — "Don't" becomes
     # "You't", tool args get mangled, math breaks. Revisit when LiteRT-LM fixes GPU accuracy.
     try:
-        return litert_lm.Engine(path, max_num_tokens=MAX_TOKENS)
+        return litert_lm.Engine(path, max_num_tokens=max_tokens)
     finally:
         _restore_stderr(saved_fd)
 
@@ -66,11 +73,20 @@ def _get_pixie_engine() -> litert_lm.Engine:
     return _pixie_engine
 
 
+def _get_think_engine() -> litert_lm.Engine:
+    """Capped engine for thinking calls — limits total output (thinking + response)."""
+    global _think_engine
+    if _think_engine is None:
+        _think_engine = _quiet_engine(MODEL_PATH, max_tokens=THINK_MAX_TOKENS)
+    return _think_engine
+
+
 def cleanup():
     """Delete engines to avoid nanobind leak warnings on exit."""
-    global _engine, _pixie_engine
+    global _engine, _pixie_engine, _think_engine
     _engine = None
     _pixie_engine = None
+    _think_engine = None
 
 
 def chat(system: str, user: str) -> str:
@@ -108,7 +124,7 @@ def think(system: str, question: str) -> dict:
     Verified experimentally.
     So we spin up a fresh tool-based conversation per thinking request.
     """
-    engine = _get_pixie_engine()
+    engine = _get_think_engine()
     saved = _suppress_stderr()
     try:
         with engine.create_conversation(
