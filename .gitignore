@@ -29,3 +29,6 @@ config.local.py
 # Temporary files
 default.profraw
 junk/
+
+# Downloaded model weights
+models/*.onnx

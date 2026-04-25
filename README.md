@@ -4,23 +4,42 @@ My local voice assistant. Listens via microphone, transcribes with Whisper, thin
 
 ## What it can do
 - Answer questions (Wikipedia or DuckDuckGo, auto-routed)
-- Play music (requires `MUSIC_DIR` in `config.local.py`)
-- Check weather
+- Extended reasoning for math, logic, and multi-step problems
+- Execute Python code in an isolated sandbox
+- Play and control music (requires `MUSIC_DIR` in `config.local.py`)
+- Check weather and current date/time
 - Save and recall personal notes with keyword, tag, and time-range search
-- Reset conversation history
+- Mute until next wake word
+- Reset conversation history + auto-compaction
 - Shut down on command
 
 ## Stack
-- **STT**: Faster Whisper (`base`)
-- **LLM**: Gemma via LiteRT-LM (100% GPU on Apple Silicon)
+- **STT**: Faster Whisper (`small.en`)
+- **LLM**: Gemma via LiteRT-LM
 - **TTS**: Kokoro (`af_heart` voice)
 - **Search**: Wikipedia + DuckDuckGo
 - **Notes**: SQLite FTS5 with stemming, time parsing, and query expansion
 
+## Setup
+
+1. Install [VLC](https://www.videolan.org/vlc/) (required for music playback).
+
+2. Download the Gemma model weights from [HuggingFace](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm) and place the `.litertlm` file at:
+   ```
+   ~/.litert-lm/models/gemma-e2b/model.litertlm
+   ```
+
+3. Open OrbStack (required for the code execution sandbox).
+
+4. Download the smart-turn VAD model weights:
+   ```bash
+   curl -L -o models/smart-turn-v3.2-cpu.onnx \
+     "https://huggingface.co/pipecat-ai/smart-turn-v3/resolve/main/smart-turn-v3.2-cpu.onnx"
+   ```
+
 ## Run
 
 ```bash
-ollama serve
 uv run main.py
 ```
 

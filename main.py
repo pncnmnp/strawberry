@@ -31,6 +31,7 @@ from tools.code import start as _sandbox_start
 from pixies import compact_history
 from lm import get_engine, cleanup as lm_cleanup, _suppress_stderr, _restore_stderr
 from log import log, log_context, context_pct, divider, compute_tool_schema_tokens
+from vad import is_turn_complete
 
 # For sentence tokenization
 nltk.download("punkt_tab", quiet=True)
@@ -38,7 +39,8 @@ nltk.download("punkt_tab", quiet=True)
 SAMPLE_RATE = 16000        # samples per second
 CHUNK_DURATION = 0.1       # seconds per chunk
 SILENCE_THRESHOLD = 0.01   # RMS amplitude below this = silence
-SILENCE_DURATION = 1.5     # seconds of silence to stop recording
+SILENCE_DURATION = 3       # seconds of silence — hard cutoff if smart-turn keeps saying incomplete
+PAUSE_CHECK_DURATION = 0.75  # seconds of silence after speech before consulting smart-turn
 MAX_DURATION = 30          # safety cap in seconds
 PRE_SPEECH_TIMEOUT = 10    # seconds to wait before any speech is detected
 COMPACT_THRESHOLD = 0.66   # context fraction that triggers auto-compaction
@@ -133,18 +135,37 @@ def wait_for_wake_word():
         if WAKE_PHRASE in text:
             log("wake", "detected!")
             subprocess.Popen(["afplay", "sounds/wake-up.mp3"])
-            return stream  # keep stream open so listen() can use it immediately
+            # drain everything and keep stream open so listen() can use it immediately
+            # NOTE: Without draining, the remnants of the audio that triggered 
+            # the wake word gets leaked in the buffer and causes misinterpretation 
+            # in the speech, leading to a false responses from the model.
+            if stream.read_available > 0:
+                stream.read(stream.read_available)
+            return stream
 
 
 def record_until_silence(stream=None, max_duration=MAX_DURATION):
     chunk_size = int(SAMPLE_RATE * CHUNK_DURATION)
     silence_chunks_needed = int(SILENCE_DURATION / CHUNK_DURATION)
+    # How many chunks of audio before we consult smart-turn?
+    pause_check_chunks = int(PAUSE_CHECK_DURATION / CHUNK_DURATION)
     max_chunks = int(max_duration / CHUNK_DURATION)
     pre_speech_chunks = int(PRE_SPEECH_TIMEOUT / CHUNK_DURATION)
+
+    # NOTE: Smart-turn votes once at PAUSE_CHECK_DURATION. If it says complete, we don't cut
+    # immediately — we wait one more second_check_chunks window and vote again. If the
+    # user resumes speaking in that gap, pending_complete resets and we carry on. Only
+    # two consecutive "complete" votes (with no speech in between) actually end the turn.
+    # This prevents filler phrases like "Well, let's see." from getting submitted mid-thought.
+    # Why 0.5 seconds for the second check? Trial and error for now.
+    second_check_chunks = int(0.5 / CHUNK_DURATION)
 
     frames = []
     silent_count = 0
     has_speech = False
+    speech_start_idx: int | None = None
+    next_vad_check = pause_check_chunks
+    pending_complete = False
 
     owns_stream = stream is None
     if owns_stream:
@@ -158,10 +179,28 @@ def record_until_silence(stream=None, max_duration=MAX_DURATION):
             frames.append(chunk.copy())
             rms = np.sqrt(np.mean(chunk ** 2))
             if rms > SILENCE_THRESHOLD:
+                if not has_speech:
+                    speech_start_idx = len(frames) - 1
                 has_speech = True
                 silent_count = 0
+                next_vad_check = pause_check_chunks
+                pending_complete = False
             elif has_speech:
                 silent_count += 1
+                # Do not fire until enough silence chunks have accumulated
+                # Why do this? To give the user X seconds (0.5) to resume speaking
+                # before the second vote cuts them off.
+                if next_vad_check > 0 and silent_count >= next_vad_check:
+                    next_vad_check = 0
+                    turn_audio = np.concatenate(frames[speech_start_idx:]).flatten()
+                    complete, prob = is_turn_complete(turn_audio)
+                    log("vad", f"prob={prob:.2f} complete={complete}")
+                    if complete:
+                        if pending_complete:
+                            break
+                        pending_complete = True
+                        # For the second vote
+                        next_vad_check = silent_count + second_check_chunks
                 if silent_count >= silence_chunks_needed:
                     break
             elif len(frames) >= pre_speech_chunks:
@@ -176,7 +215,7 @@ def record_until_silence(stream=None, max_duration=MAX_DURATION):
 
 def transcribe(audio) -> str:
     segments, _ = whisper_model.transcribe(audio, language="en")
-    return "".join(s.text for s in segments).strip()
+    return "".join(s.text for s in segments if s.no_speech_prob < 0.6).strip()
 
 
 def _wrap_tool(fn):
