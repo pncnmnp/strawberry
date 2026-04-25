@@ -24,7 +24,7 @@ music.db-journal
 .DS_Store
 
 # Local config (personal paths)
-config.local.py
+config.local.json
 
 # Temporary files
 default.profraw

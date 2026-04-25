@@ -12,11 +12,9 @@ _proc = None
 _m3u = None
 
 def _dir() -> str | None:
-    p = Path(__file__).parent.parent / "config.local.py"
+    p = Path(__file__).parent.parent / "config.local.json"
     if not p.exists(): return None
-    ns: dict = {}
-    exec(p.read_text(), ns)
-    return ns.get("MUSIC_DIR")
+    return json.loads(p.read_text()).get("MUSIC_DIR")
 
 def _db() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
@@ -167,7 +165,7 @@ def music_play(query: str = "", shuffle: bool = False) -> str:
         query: Artist, album, or song to play. Do not use query, if you want to play everything.
         shuffle: Shuffle the matching tracks.
     """
-    if not _dir(): return "Set MUSIC_DIR in config.local.py first."
+    if not _dir(): return "Set MUSIC_DIR in config.local.json first."
     _ensure_db()
     query = _clean(query)
     if query.lower() in _GENERIC: query = ""
@@ -242,7 +240,7 @@ def music_search_library(query: str, filter_by: str = "all") -> str:
         query: Name to search for. Use a specific word like "taylor" or "rock". Do NOT pass "all", "everything", or similar — pass an empty string "" to list the full library.
         filter_by: Narrow results — 'artist', 'album', 'song', or 'all' (default).
     """
-    if not _dir(): return "Set MUSIC_DIR in config.local.py first."
+    if not _dir(): return "Set MUSIC_DIR in config.local.json first."
     _ensure_db()
     query = _clean(query)
     filter_by = _clean(filter_by)
@@ -281,6 +279,6 @@ def music_search_library(query: str, filter_by: str = "all") -> str:
 def music_rebuild_index() -> str:
     """Rebuild the music library index. Call this after adding or removing music files.
     """
-    if not _dir(): return "Set MUSIC_DIR in config.local.py first."
+    if not _dir(): return "Set MUSIC_DIR in config.local.json first."
     count = _build_index()
     return f"Index rebuilt: {count} tracks."

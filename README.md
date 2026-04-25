@@ -6,7 +6,7 @@ My local voice assistant. Listens via microphone, transcribes with Whisper, thin
 - Answer questions (Wikipedia or DuckDuckGo, auto-routed)
 - Extended reasoning for math, logic, and multi-step problems
 - Execute Python code in an isolated sandbox
-- Play and control music (requires `MUSIC_DIR` in `config.local.py`)
+- Play and control music (requires `MUSIC_DIR` in `config.local.json`)
 - Check weather and current date/time
 - Save and recall personal notes with keyword, tag, and time-range search
 - Mute until next wake word
