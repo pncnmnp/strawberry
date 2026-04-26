@@ -5,7 +5,9 @@ from tools.wikipedia import _fetch, search_and_fetch
 from tools.duckduckgo import search_duckduckgo
 
 def search(query: str, backend: str = "auto") -> str:
-    """Search for information on any topic — facts, people, places, current events, products, and more.
+    """Search the web for information. Very slow (30-60s) — only use when necessary.
+    Good reasons to search: current events, recent news, real-time data, or when you are genuinely uncertain about a fact and accuracy matters.
+    Bad reasons to search: you can answer confidently, the user is just chatting, or the question is straightforward reasoning or math.
 
     Args:
         query: The topic or question to search for.
