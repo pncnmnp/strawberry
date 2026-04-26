@@ -6,7 +6,7 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "4")
 
 import litert_lm
 
-MODEL_PATH = "/Users/parth/.litert-lm/models/gemma-e2b/model.litertlm"
+MODEL_PATH = "/Users/parth/.litert-lm/models/gemma-e4b/model.litertlm"
 MAX_TOKENS = 16384
 # NOTE: Why is it low?
 # When the MAX TOKENS is set high for deep think calls, the latency can become unacceptably long.

@@ -11,7 +11,7 @@ My local voice assistant. Listens via microphone, transcribes with Whisper, thin
 - Save and recall personal notes with keyword, tag, and time-range search
 - Mute until next wake word
 - Reset conversation history + auto-compaction
-- Shut down on command
+- Shut down and powercycle on command
 
 ## Stack
 - **STT**: Faster Whisper (`small.en`)

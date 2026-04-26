@@ -27,7 +27,7 @@ from nltk.tokenize import sent_tokenize
 from prompts.mk1 import SYSTEM_PROMPT, PRIOR_CONVERSATION
 from tools import TOOL_FUNCTIONS
 from tools.music import _alive as _music_alive, _kill_stale as _music_kill_stale
-from tools.code import start as _sandbox_start
+from tools.code import start as _sandbox_start, stop as _sandbox_stop
 from pixies import compact_history
 from lm import get_engine, cleanup as lm_cleanup, _suppress_stderr, _restore_stderr
 from log import log, log_context, context_pct, divider, compute_tool_schema_tokens
@@ -58,7 +58,7 @@ tts = KPipeline(lang_code='a')
 
 TYPING_MUSIC_FILE = os.path.join(os.path.dirname(__file__), "sounds", "typing.mp3")
 
-SIGNALS = ("shutting_down", "resetting", "muting")
+SIGNALS = ("shutting_down", "resetting", "muting", "powercycling")
 
 
 @dataclass
@@ -172,6 +172,11 @@ def record_until_silence(stream=None, max_duration=MAX_DURATION):
         stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
                                 blocksize=chunk_size)
         stream.start()
+    else:
+        # The wake phrase is still trickling through the audio pipeline even after
+        # the buffer drain in wait_for_wake_word. Discard ~400ms to let it clear.
+        for _ in range(int(0.4 / CHUNK_DURATION)):
+            stream.read(chunk_size)
 
     try:
         while len(frames) < max_chunks:
@@ -498,6 +503,17 @@ def main():
                 lm_cleanup()
                 subprocess.run(["afplay", "sounds/shutdown.mp3"])
                 break
+
+            case "powercycling":
+                dump_history(history)
+                log("speak", "powercycling...")
+                divider()
+                _music_kill_stale()
+                _sandbox_stop()
+                state.conversation = None
+                lm_cleanup()
+                subprocess.run(["afplay", "sounds/shutdown.mp3"])
+                os.execv(sys.executable, [sys.executable] + sys.argv)
 
             case "muting":
                 log("wake", "muting — wake word required next time")
