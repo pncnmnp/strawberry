@@ -2,6 +2,7 @@ import atexit
 import socket
 import subprocess
 import time
+from log import log
 
 _PORT = 9731
 _CPUS = "1"
@@ -9,8 +10,19 @@ _MEMORY = "512m"
 _container_id: str | None = None
 
 
+def _kill_stale():
+    r = subprocess.run(
+        ["docker", "ps", "-q", "--filter", f"publish={_PORT}"],
+        capture_output=True, text=True,
+    )
+    for cid in r.stdout.strip().splitlines():
+        subprocess.run(["docker", "kill", cid], capture_output=True)
+        log("code", f"killed stale container {cid[:12]}")
+
+
 def start():
     global _container_id
+    _kill_stale()
     r = subprocess.run(
         ["docker", "run", "-d", "--rm",
          f"--cpus={_CPUS}", f"--memory={_MEMORY}",

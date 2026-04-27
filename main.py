@@ -455,8 +455,19 @@ def _warmup():
     log("warmup", "llm warmup done")
 
 
+def _ensure_syncthing():
+    try:
+        subprocess.run(["pgrep", "-x", "syncthing"], check=True, capture_output=True)
+        log("syncthing", "already running")
+    except subprocess.CalledProcessError:
+        # No syncthing process found, start it
+        subprocess.Popen(["syncthing", "--no-browser"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        log("syncthing", "started")
+
+
 def main():
     threading.Thread(target=_watch_stdin, daemon=True).start()
+    _ensure_syncthing()
     compute_tool_schema_tokens(TOOL_FUNCTIONS)
     _make_conversation()
     sandbox_thread = threading.Thread(target=_sandbox_start, daemon=True)

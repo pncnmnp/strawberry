@@ -15,6 +15,7 @@ history/
 # Personal notes
 notes.db
 notes.db-journal
+obsidian/
 
 # Music library index
 music.db

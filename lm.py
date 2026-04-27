@@ -7,6 +7,7 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "4")
 import litert_lm
 
 MODEL_PATH = "/Users/parth/.litert-lm/models/gemma-e4b/model.litertlm"
+PIXIE_MODEL_PATH = "/Users/parth/.litert-lm/models/gemma-e4b/model.litertlm"
 MAX_TOKENS = 16384
 # NOTE: Why is it low?
 # When the MAX TOKENS is set high for deep think calls, the latency can become unacceptably long.
@@ -69,7 +70,7 @@ def _get_pixie_engine() -> litert_lm.Engine:
     """Separate engine for pixie one-shot calls (avoids session conflict)."""
     global _pixie_engine
     if _pixie_engine is None:
-        _pixie_engine = _quiet_engine(MODEL_PATH)
+        _pixie_engine = _quiet_engine(PIXIE_MODEL_PATH)
     return _pixie_engine
 
 

@@ -8,7 +8,8 @@ My local voice assistant. Listens via microphone, transcribes with Whisper, thin
 - Execute Python code in an isolated sandbox
 - Play and control music (requires `MUSIC_DIR` in `config.local.json`)
 - Check weather and current date/time
-- Save and recall personal notes with keyword, tag, and time-range search
+- Save and recall personal notes (Markdown supported) with keyword, tag, and time-range search
+- Recall and complete todos from a synced `TODO.md`
 - Mute until next wake word
 - Reset conversation history + auto-compaction
 - Shut down and powercycle on command
@@ -18,7 +19,7 @@ My local voice assistant. Listens via microphone, transcribes with Whisper, thin
 - **LLM**: Gemma via LiteRT-LM
 - **TTS**: Kokoro (`af_heart` voice)
 - **Search**: Wikipedia + DuckDuckGo
-- **Notes**: SQLite FTS5 with stemming, time parsing, and query expansion
+- **Notes**: Markdown files in an Obsidian vault, synced to mobile via Syncthing
 
 ## Setup
 
@@ -31,7 +32,13 @@ My local voice assistant. Listens via microphone, transcribes with Whisper, thin
 
 3. Open OrbStack (required for the code execution sandbox).
 
-4. Download the smart-turn VAD model weights:
+4. Set up notes sync (optional):
+   - Install [Obsidian](https://obsidian.md/download) and open `obsidian/strawberry` as a vault.
+   - Install [Syncthing](https://syncthing.net/) on macOS (`brew install syncthing && brew services start syncthing`) and on Android (Syncthing-Fork).
+   - Pair devices at `http://127.0.0.1:8384`, share the `obsidian/strawberry` folder, and open the synced folder as a vault in Obsidian on Android.
+   - Add todos manually to `obsidian/strawberry/TODO.md` — Strawberry can read and tick them off.
+
+5. Download the smart-turn VAD model weights:
    ```bash
    curl -L -o models/smart-turn-v3.2-cpu.onnx \
      "https://huggingface.co/pipecat-ai/smart-turn-v3/resolve/main/smart-turn-v3.2-cpu.onnx"
