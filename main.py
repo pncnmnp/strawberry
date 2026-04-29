@@ -32,6 +32,7 @@ from pixies import compact_history
 from lm import get_engine, cleanup as lm_cleanup, _suppress_stderr, _restore_stderr
 from log import log, log_context, context_pct, divider, compute_tool_schema_tokens
 from vad import is_turn_complete
+import audio_ws
 
 # For sentence tokenization
 nltk.download("punkt_tab", quiet=True)
@@ -44,6 +45,7 @@ PAUSE_CHECK_DURATION = 0.75  # seconds of silence after speech before consulting
 MAX_DURATION = 30          # safety cap in seconds
 PRE_SPEECH_TIMEOUT = 10    # seconds to wait before any speech is detected
 COMPACT_THRESHOLD = 0.66   # context fraction that triggers auto-compaction
+BARGE_IN_VERIFY_FRAMES = 8 # accumulate ~512 ms of above-threshold audio before whisper-verifying it's actually speech
 
 # NOTE: small.en is about 3x slower (~1.2 sec) than base.en (~400 ms).
 # However, we have made a lot of optimizations elsewhere, to enable this faster model.
@@ -73,6 +75,39 @@ class AppState:
 
 
 state = AppState()
+
+
+class _WSAudioStream:
+    """
+    Drop-in replacement for sd.InputStream backed by the WebSocket audio bridge.
+
+    Why 'drop-in'? The initial code used sd.InputStream, however, with AEC + Barge-in support,
+    the architecture evolved. This keeps the same interface for now to minimize changes.
+    TODO: Refactoring - not a high priority right now.
+    """
+
+    def start(self): pass
+    def stop(self):  pass
+    def close(self): pass
+
+    def __init__(self):
+        self._buf = np.array([], dtype=np.float32)
+
+    @property
+    def read_available(self) -> int:
+        return len(self._buf)
+
+    def read(self, frames: int):
+        while len(self._buf) < frames:
+            chunk = audio_ws.get_frame()
+            if chunk is None:
+                raise RuntimeError("audio bridge disconnected")
+            self._buf = np.concatenate([self._buf, chunk.flatten()])
+        result = self._buf[:frames].reshape(-1, 1)
+        self._buf = self._buf[frames:]
+        # why false? mirrors overflow behavior of sd.InputStream
+        return result, False
+
 
 def _watch_stdin():
     """Raise KeyboardInterrupt in main thread when Ctrl+D (EOF) is pressed."""
@@ -109,8 +144,7 @@ def wait_for_wake_word():
     buffer = []
 
     log("wake", f'listening for "{WAKE_PHRASE}"...')
-    stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
-                            blocksize=chunk_size)
+    stream = _WSAudioStream()
     stream.start()
     while True:
         chunk, _ = stream.read(chunk_size)
@@ -169,8 +203,7 @@ def record_until_silence(stream=None, max_duration=MAX_DURATION):
 
     owns_stream = stream is None
     if owns_stream:
-        stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
-                                blocksize=chunk_size)
+        stream = _WSAudioStream()
         stream.start()
     else:
         # The wake phrase is still trickling through the audio pipeline even after
@@ -293,6 +326,11 @@ def listen(stream=None) -> str | None:
     # HACK: music bleeds into the mic, causing whisper to keep "hearing" audio and
     # never hit the silence threshold — so we clamp the window hard when VLC is running.
     max_dur = 7 if _music_alive() else MAX_DURATION
+    # Drop frames that accumulated in the queue during respond(). 
+    # Skip when a barge-in replay is pending — those frames are the user's actual speech.
+    if stream is None and not audio_ws.has_replay():
+        time.sleep(0.15)  # let in-flight WebSocket frames from TTS land before draining
+        audio_ws.drain()
     log("listen", "waiting for speech...")
     audio = record_until_silence(stream, max_duration=max_dur)
     if stream:
@@ -334,6 +372,72 @@ def speak(text: str):
         except KeyboardInterrupt:
             sd.stop()
             raise
+
+
+def _barge_in_monitor(stop_event: threading.Event, barge_in: threading.Event, buf: list, tts_active: threading.Event):
+    """Drain mic queue during TTS; set barge_in when whisper-verified speech is detected.
+
+    IMPORTANT DESIGN: 
+    Above-threshold frames accumulate into buf; once ~512 ms have collected, 
+    run tiny whisper to verify it's actual speech rather than typing/sneezing/coughing/etc. 
+    RMS alone fires on any energy spike, which kept yanking TTS out for non-speech sounds.
+
+    buf is populated only from speech onset + a small pre-roll, so replay never
+    contains the long silence window captured during TTS before the user spoke.
+
+    Speech tracking is gated on tts_active — during the LLM generation phase there
+    is nothing to barge into, and ambient noise over 3-10 seconds easily produces
+    sustained above-threshold frames. We still consume frames here (so the queue
+    doesn't back up) — we just don't let them count toward barge-in.
+    """
+    speech_count = 0
+    pre_buf: list = []   # rolling pre-speech context (a few frames)
+    PRE_ROLL = 3         # frames to keep before speech onset (~192 ms)
+
+    while not stop_event.is_set() and not barge_in.is_set():
+        frame = audio_ws.get_frame(timeout=0.1)
+        if frame is None:
+            continue
+
+        if not tts_active.is_set():
+            speech_count = 0
+            pre_buf.clear()
+            buf.clear()
+            continue
+
+        rms = np.sqrt(np.mean(frame ** 2))
+        if rms > SILENCE_THRESHOLD:
+            if speech_count == 0:
+                buf.clear()
+                buf.extend(pre_buf)
+            speech_count += 1
+            buf.append(frame)
+            if speech_count >= BARGE_IN_VERIFY_FRAMES:
+                audio = np.concatenate(buf).flatten()
+                segments, _ = wake_model.transcribe(
+                    audio, language="en", beam_size=1, without_timestamps=True,
+                )
+                text = "".join(s.text for s in segments if s.no_speech_prob < 0.6).strip()
+                if text:
+                    log("barge", f'"{text}"')
+                    barge_in.set()
+                else:
+                    log("barge", "ignored (no speech)")
+                    speech_count = 0
+                    buf.clear()
+                    pre_buf.clear()
+        else:
+            speech_count = max(0, speech_count - 1)
+            if speech_count == 0:
+                buf.clear()
+                pre_buf.append(frame)
+                if len(pre_buf) > PRE_ROLL:
+                    pre_buf.pop(0)
+            else:
+                # silence within an active speech segment
+                # this would be quiet frames mid-speech, like the breath, the pause between words, etc.
+                # preserves the natural rhythm of what we said, so that STT gets the best possible input for barge-in verification
+                buf.append(frame)
 
 
 def respond(text: str, history: list) -> str | None:
@@ -393,23 +497,46 @@ def respond(text: str, history: list) -> str | None:
         finally:
             audio_queue.put(None)
 
+    barge_in = threading.Event()
+    tts_active = threading.Event()
+    barge_in_buf: list = []
+    barge_in_thread = threading.Thread(
+        target=_barge_in_monitor, args=(stop_event, barge_in, barge_in_buf, tts_active), daemon=True
+    )
+
     producer = threading.Thread(target=_produce, daemon=True)
     synthesizer = threading.Thread(target=_synthesize, daemon=True)
     start_music()
     producer.start()
     synthesizer.start()
+    barge_in_thread.start()
 
     try:
         while True:
-            chunk = audio_queue.get()
+            try:
+                chunk = audio_queue.get(timeout=0.05)
+            except queue.Empty:
+                if barge_in.is_set():
+                    sd.stop()
+                    stop_event.set()
+                    # prepend captured speech so listen() doesn't miss what the user said
+                    audio_ws.replay(barge_in_buf)
+                    return None
+                continue
             if chunk is None:
                 break
             if chunk is _ERROR:
                 raise exc or RuntimeError("unknown producer error")
             stop_music()
+            tts_active.set()
             sd.play(chunk, samplerate=24000)
             while sd.get_stream().active:
                 time.sleep(0.05)
+                if barge_in.is_set():
+                    sd.stop()
+                    stop_event.set()
+                    audio_ws.replay(barge_in_buf)
+                    return None
 
         if state.signal:
             return state.signal
@@ -437,8 +564,9 @@ def respond(text: str, history: list) -> str | None:
         return None
     finally:
         stop_music()
+        stop_event.set()
+        barge_in_thread.join(timeout=0.5)
         if producer.is_alive():
-            stop_event.set()
             producer.join()
         if synthesizer.is_alive():
             synthesizer.join()
@@ -468,12 +596,17 @@ def _ensure_syncthing():
 def main():
     threading.Thread(target=_watch_stdin, daemon=True).start()
     _ensure_syncthing()
+    audio_ws.start()
+    subprocess.Popen(["open", f"http://localhost:{audio_ws.HTTP_PORT}/audio_bridge.html"])
     compute_tool_schema_tokens(TOOL_FUNCTIONS)
     _make_conversation()
     sandbox_thread = threading.Thread(target=_sandbox_start, daemon=True)
     sandbox_thread.start()
     _warmup()
     sandbox_thread.join()
+    if not audio_ws.wait_connected(timeout=5):
+        log("ws", f"waiting — open http://localhost:{audio_ws.HTTP_PORT}/audio_bridge.html and click Connect")
+        audio_ws.wait_connected(timeout=120)
     history = [{"role": "system", "content": SYSTEM_PROMPT}]
     awake = False
 

@@ -14,5 +14,6 @@ dependencies = [
     "numpy>=2.4.4",
     "ollama>=0.6.1",
     "sounddevice>=0.5.5",
+    "websockets>=16.0",
     "wikipedia>=1.4.0",
 ]

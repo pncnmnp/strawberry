@@ -29,6 +29,8 @@ _LABELS: dict[str, tuple[str, str]] = {
     "compact":  ("COMPACT",   "bold magenta"),
     "syncthing":("SYNCTHING", "bold color(70)"),
     "code":     ("CODE",      "bold color(214)"),
+    "ws":       ("WS",        "bold color(39)"),
+    "barge":    ("BARGE",     "bold color(213)"),
 }
 
 _last_time: float = time.perf_counter()

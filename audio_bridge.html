@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Strawberry</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: monospace;
+      background: #0d0d0d;
+      color: #bbb;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      gap: 20px;
+    }
+    h2 { color: #fff; letter-spacing: 2px; }
+    button {
+      padding: 10px 28px;
+      font-family: monospace;
+      font-size: 14px;
+      background: #1a1a1a;
+      color: #ddd;
+      border: 1px solid #333;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+    button:hover:not(:disabled) { border-color: #666; }
+    button:disabled { opacity: 0.35; cursor: default; }
+    #status { font-size: 13px; color: #555; display: flex; align-items: center; gap: 8px; }
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #333; flex-shrink: 0;
+      transition: background 0.3s;
+    }
+    .dot.active { background: #3a3; }
+    .dot.error  { background: #a33; }
+  </style>
+</head>
+<body>
+  <h2>STRAWBERRY</h2>
+  <button id="btn" onclick="connect()">Connect Microphone</button>
+  <div id="status"><span class="dot" id="dot"></span><span id="msg">Not connected</span></div>
+
+  <script>
+    const WS_URL = 'ws://localhost:8768';
+    let ws, audioCtx, processor, micStream;
+
+    function setStatus(msg, state) {
+      document.getElementById('msg').textContent = msg;
+      const dot = document.getElementById('dot');
+      dot.className = 'dot' + (state === 'ok' ? ' active' : state === 'err' ? ' error' : '');
+    }
+
+    async function connect() {
+      const btn = document.getElementById('btn');
+      btn.disabled = true;
+      setStatus('Connecting to Strawberry...');
+
+      ws = new WebSocket(WS_URL);
+      ws.binaryType = 'arraybuffer';
+
+      ws.onopen = async () => {
+        try {
+          micStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+              channelCount: 1,
+            }
+          });
+
+          // AudioContext at 16 kHz — Chrome resamples from hardware rate internally.
+          // AEC runs at the hardware level before resampling, so it's unaffected.
+          audioCtx = new AudioContext({ sampleRate: 16000 });
+          const source = audioCtx.createMediaStreamSource(micStream);
+
+          // 1024 samples @ 16 kHz = 64 ms of audio per chunk.
+          // Every 64 ms, onaudioprocess is fired and we send one chunk to server.
+          processor = audioCtx.createScriptProcessor(1024, 1, 1);
+          processor.onaudioprocess = (e) => {
+            if (ws.readyState !== WebSocket.OPEN) return;
+            const samples = e.inputBuffer.getChannelData(0);
+            ws.send(samples.buffer.slice(0));
+          };
+
+          source.connect(processor);
+          processor.connect(audioCtx.destination); // must be connected to run
+
+          setStatus('Microphone active — AEC enabled', 'ok');
+        } catch (err) {
+          setStatus('Mic error: ' + err.message, 'err');
+          btn.disabled = false;
+        }
+      };
+
+      ws.onclose = () => {
+        setStatus('Disconnected');
+        if (processor)  { processor.disconnect(); processor = null; }
+        if (micStream)  { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+        if (audioCtx)   { audioCtx.close(); audioCtx = null; }
+        btn.disabled = false;
+      };
+
+      ws.onerror = () => setStatus('WebSocket error', 'err');
+    }
+  </script>
+</body>
+</html>
