@@ -1,11 +1,23 @@
 import re
-import urllib.request
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from html.parser import HTMLParser
+import httpx
 from ddgs import DDGS
 from log import log
-from pixies import page_summarize
+
+
+_CLIENT = httpx.Client(
+    http2=True,
+    follow_redirects=True,
+    timeout=3.0,
+    headers={
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+    },
+)
 
 
 def _clean(text: str) -> str:
@@ -55,56 +67,48 @@ def _clean_url(url: str) -> str:
     return url
 
 
-def _fetch_page(url: str, timeout: int = 6) -> str:
+def _fetch_page(url: str) -> str:
     url = _clean_url(url)
-    req = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        },
-    )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _CLIENT.stream("GET", url) as resp:
+            resp.raise_for_status()
             content_type = resp.headers.get("Content-Type", "")
-            if "text/html" not in content_type:
+            if "text/html" not in content_type and "application/xhtml" not in content_type:
                 return ""
-            html = resp.read(50_000).decode("utf-8", errors="ignore")
-    except Exception:
+            buf = bytearray()
+            for chunk in resp.iter_bytes():
+                buf.extend(chunk)
+                if len(buf) >= 500_000:
+                    break
+            html = bytes(buf[:500_000]).decode("utf-8", errors="ignore")
+    except Exception as e:
+        log("duckduckgo", f"fetch failed {url}: {type(e).__name__}: {e}")
         return ""
 
     parser = _TextExtractor()
     parser.feed(html)
-    return parser.get_text()[:5000]
+    return parser.get_text()[:4000]
 
 
-def search_duckduckgo(query: str) -> str:
+def fetch_sources(query: str) -> list[tuple[str, str]]:
+    """Run a DDG search, scrape pages in parallel, return up to 4 (title, text) sources.
+    Falls back to the DDG snippet for any page that fails to scrape (commercial sites often block bots)."""
     results = DDGS().text(query + " -site:youtube.com -site:youtu.be -site:vimeo.com -site:twitch.tv", max_results=6)
     if not results:
-        return f"No results found for '{query}'."
+        return []
 
     for r in results:
         log("duckduckgo", r["href"])
 
-    # Fetch pages in parallel; summarize each as soon as it lands (pipeline).
-    # If scraping fails, fall back to the DDG snippet — short but real content.
-    summaries = []
+    sources: list[tuple[str, str]] = []
     with ThreadPoolExecutor(max_workers=6) as pool:
         futures = {pool.submit(_fetch_page, r["href"]): r for r in results}
         for future in as_completed(futures):
             r = futures[future]
-            text = future.result()
-            if text:
-                summary = page_summarize(query, r["title"], text)
-            else:
-                snippet = _clean(r.get("body", ""))
+            if text := future.result():
+                sources.append((r["title"], text))
+            elif snippet := _clean(r.get("body", "")):
                 log("duckduckgo", f"scrape failed, using snippet: {r['href']}")
-                summary = snippet
-            if summary:
-                summaries.append(f"Source: {r['title']}\n{summary}")
-            if len(summaries) == 4:
-                break
+                sources.append((r["title"], snippet))
 
-    if not summaries:
-        return f"No usable results found for '{query}'."
-
-    return "\n\n".join(summaries)
+    return sources[:3]

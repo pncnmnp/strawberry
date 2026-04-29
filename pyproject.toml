@@ -5,8 +5,10 @@ description = "A local voice assistant"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "brotli>=1.2.0",
     "ddgs>=9.12.1",
     "faster-whisper>=1.2.1",
+    "httpx[http2]>=0.28.1",
     "kokoro>=0.9.4",
     "litert-lm>=0.10.1",
     "mutagen>=1.47.0",

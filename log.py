@@ -1,4 +1,5 @@
 from rich.console import Console
+from rich.markup import escape
 from rich.rule import Rule
 import inspect
 import time
@@ -80,4 +81,4 @@ def log(kind: str, message: str = ""):
     _last_time = now
 
     label, style = _LABELS[kind]
-    console.print(f"  [{style}]{label:<8}[/{style}]  {message}  [dim]+{delta_ms:.0f}ms[/dim]")
+    console.print(f"  [{style}]{label:<8}[/{style}]  {escape(message)}  [dim]+{delta_ms:.0f}ms[/dim]")

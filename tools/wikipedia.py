@@ -1,23 +1,26 @@
+from concurrent.futures import ThreadPoolExecutor
 import wikipedia
 
 
-def _fetch(title: str) -> str:
+def _fetch(title: str) -> str | None:
     try:
         page = wikipedia.page(title, auto_suggest=False)
         return page.summary
     except wikipedia.DisambiguationError as e:
         return _fetch(e.options[0])
     except wikipedia.PageError:
-        return f"No Wikipedia page found for '{title}'."
+        return None
 
 
-def search_and_fetch(query: str) -> str:
-    """Use Wikipedia's own search to find the best article for a query."""
+def fetch_source(query: str) -> tuple[str, str] | None:
+    """Search Wikipedia and return (title, summary) of the highest-ranked matching article, or None."""
     results = wikipedia.search(query, results=10)
     if not results:
-        return f"No Wikipedia page found for '{query}'."
-    for title in results:
-        result = _fetch(title)
-        if not result.startswith("No Wikipedia page"):
-            return result
-    return f"No Wikipedia page found for '{query}'."
+        return None
+    # Fan out fetches in parallel; walk in rank order so we still return the highest-ranked hit.
+    with ThreadPoolExecutor(max_workers=len(results)) as pool:
+        future_titles = [(title, pool.submit(_fetch, title)) for title in results]
+        for title, future in future_titles:
+            if (text := future.result()) is not None:
+                return (title, text)
+    return None
