@@ -7,6 +7,8 @@ requires-python = ">=3.12"
 dependencies = [
     "brotli>=1.2.0",
     "ddgs>=9.12.1",
+    "einops>=0.8.2",
+    "faiss-cpu>=1.13.2",
     "faster-whisper>=1.2.1",
     "httpx[http2]>=0.28.1",
     "kokoro>=0.9.4",
@@ -15,6 +17,7 @@ dependencies = [
     "nltk>=3.9.4",
     "numpy>=2.4.4",
     "ollama>=0.6.1",
+    "sentence-transformers>=5.4.1",
     "sounddevice>=0.5.5",
     "websockets>=16.0",
     "wikipedia>=1.4.0",

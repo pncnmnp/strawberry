@@ -32,6 +32,7 @@ _LABELS: dict[str, tuple[str, str]] = {
     "code":     ("CODE",      "bold color(214)"),
     "ws":       ("WS",        "bold color(39)"),
     "barge":    ("BARGE",     "bold color(213)"),
+    "memory":   ("MEMORY",   "bold color(183)"),
 }
 
 _last_time: float = time.perf_counter()

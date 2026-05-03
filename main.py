@@ -33,6 +33,7 @@ from lm import get_engine, cleanup as lm_cleanup, _suppress_stderr, _restore_std
 from log import log, log_context, context_pct, divider, compute_tool_schema_tokens
 from vad import is_turn_complete
 import audio_ws
+import memory
 
 # For sentence tokenization
 nltk.download("punkt_tab", quiet=True)
@@ -72,6 +73,7 @@ class AppState:
     exit_requested: threading.Event = field(default_factory=threading.Event)
     tool_chars: int = 0  # cumulative chars from tool calls + results (not in history)
     last_thought: str | None = None
+    partial_reply: str | None = None  # set when barge-in cuts off a response mid-sentence
 
 
 state = AppState()
@@ -296,6 +298,7 @@ def _reset_history(system: str = SYSTEM_PROMPT) -> list:
 def _compact(history: list) -> list:
     log("compact", f"above threshold of {int(COMPACT_THRESHOLD * 100)} — auto-compacting...")
     speak("We're past the context threshold, Sir. Running auto-compaction — one moment.")
+    memory.flush()
     start_music()
     try:
         summary = compact_history(history)
@@ -442,6 +445,7 @@ def _barge_in_monitor(stop_event: threading.Event, barge_in: threading.Event, bu
 
 def respond(text: str, history: list) -> str | None:
     state.signal = None
+    state.partial_reply = None
     assert state.conversation is not None
 
     sentence_queue: queue.Queue = queue.Queue()
@@ -519,6 +523,7 @@ def respond(text: str, history: list) -> str | None:
                 if barge_in.is_set():
                     sd.stop()
                     stop_event.set()
+                    state.partial_reply = full_text or None
                     # prepend captured speech so listen() doesn't miss what the user said
                     audio_ws.replay(barge_in_buf)
                     return None
@@ -535,6 +540,7 @@ def respond(text: str, history: list) -> str | None:
                 if barge_in.is_set():
                     sd.stop()
                     stop_event.set()
+                    state.partial_reply = full_text or None
                     audio_ws.replay(barge_in_buf)
                     return None
 
@@ -593,6 +599,16 @@ def _ensure_syncthing():
         log("syncthing", "started")
 
 
+def _commit_turn(history: list, user_text: str, assistant_text: str):
+    history.append({"role": "user", "content": user_text})
+    if state.last_thought:
+        history.append({"role": "assistant", "content": f"[Thought]\n{state.last_thought}"})
+        state.last_thought = None
+    history.append({"role": "assistant", "content": assistant_text})
+    log_context(history, tool_chars=state.tool_chars)
+    memory.queue_turn(user_text, assistant_text)
+
+
 def main():
     threading.Thread(target=_watch_stdin, daemon=True).start()
     _ensure_syncthing()
@@ -602,8 +618,11 @@ def main():
     _make_conversation()
     sandbox_thread = threading.Thread(target=_sandbox_start, daemon=True)
     sandbox_thread.start()
+    memory_thread = threading.Thread(target=memory.load, daemon=True)
+    memory_thread.start()
     _warmup()
     sandbox_thread.join()
+    memory_thread.join()
     if not audio_ws.wait_connected(timeout=5):
         log("ws", f"waiting — open http://localhost:{audio_ws.HTTP_PORT}/audio_bridge.html and click Connect")
         audio_ws.wait_connected(timeout=120)
@@ -625,10 +644,16 @@ def main():
         if not text:
             continue
 
+        # FYI: we are prepending memory block on top of user input on every turn.
+        augmented = (prefix + text) if (prefix := memory.retrieve(text)) else text
+
         if context_pct(history, state.tool_chars) >= COMPACT_THRESHOLD:
             history = _compact(history)
 
-        if (reply := respond(text, history)) is None:
+        if (reply := respond(augmented, history)) is None:
+            if partial := state.partial_reply:
+                _commit_turn(history, text, partial)
+                state.partial_reply = None
             continue
 
         match reply:
@@ -639,6 +664,7 @@ def main():
                 speak("Sure, starting fresh.")
 
             case "shutting_down":
+                memory.flush()
                 dump_history(history)
                 log("speak", "shutting down...")
                 divider()
@@ -649,6 +675,7 @@ def main():
                 break
 
             case "powercycling":
+                memory.flush()
                 dump_history(history)
                 log("speak", "powercycling...")
                 divider()
@@ -660,17 +687,13 @@ def main():
                 os.execv(sys.executable, [sys.executable] + sys.argv)
 
             case "muting":
+                # No memory flush on mute - we want to have short wake-up latency
                 log("wake", "muting — wake word required next time")
                 awake = False
 
             case _:
                 log("reply", f'"{reply}"')
-                history.append({"role": "user", "content": text})
-                if state.last_thought:
-                    history.append({"role": "assistant", "content": f"[Thought]\n{state.last_thought}"})
-                    state.last_thought = None
-                history.append({"role": "assistant", "content": reply})
-                log_context(history, tool_chars=state.tool_chars)
+                _commit_turn(history, text, reply)
 
 if __name__ == "__main__":
     main()
