@@ -1,13 +1,23 @@
+import json
 import os
 import sys
+from pathlib import Path
 
 os.environ.setdefault("GLOG_minloglevel", "4")
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "4")
 
 import litert_lm
 
-MODEL_PATH = "/Users/parth/.litert-lm/models/gemma-e4b/model.litertlm"
-PIXIE_MODEL_PATH = "/Users/parth/.litert-lm/models/gemma-e4b/model.litertlm"
+def _load_model_path() -> str:
+    p = Path(__file__).parent / "config.local.json"
+    if not p.exists():
+        raise FileNotFoundError("config.local.json not found — add MODEL_PATH to it")
+    v = json.loads(p.read_text()).get("MODEL_PATH")
+    if not v:
+        raise KeyError("MODEL_PATH missing from config.local.json")
+    return v
+
+MODEL_PATH = _load_model_path()
 MAX_TOKENS = 16384
 # NOTE: Why is it low?
 # When the MAX TOKENS is set high for deep think calls, the latency can become unacceptably long.
@@ -70,7 +80,7 @@ def _get_pixie_engine() -> litert_lm.Engine:
     """Separate engine for pixie one-shot calls (avoids session conflict)."""
     global _pixie_engine
     if _pixie_engine is None:
-        _pixie_engine = _quiet_engine(PIXIE_MODEL_PATH)
+        _pixie_engine = _quiet_engine(MODEL_PATH)
     return _pixie_engine
 
 
