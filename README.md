@@ -27,6 +27,14 @@ My local voice assistant. Listens via microphone, transcribes with Whisper, thin
 
 ## Setup
 
+The quickest path is the setup script — it installs `uv`, syncs dependencies, downloads the VAD + Gemma models, and scaffolds `config.local.json`. It's idempotent, so re-running it only does outstanding work (and resumes interrupted downloads):
+
+```bash
+./setup.sh
+```
+
+You'll still need VLC and OrbStack (steps 1 and 5 below) for music playback and the code sandbox. To set things up by hand instead:
+
 1. Install [VLC](https://www.videolan.org/vlc/) (required for music playback).
 
 2. Download the Gemma model weights from [HuggingFace](https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm) and note the path to the `.litertlm` file.
